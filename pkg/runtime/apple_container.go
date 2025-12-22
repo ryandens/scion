@@ -106,11 +106,14 @@ func (r *AppleContainerRuntime) Run(ctx context.Context, config RunConfig) (stri
 
 	args = append(args, config.Image)
 
-	geminiArgs := []string{"gemini", "--yolo", "--prompt-interactive", config.Task}
 	if config.UseTmux {
-		args = append(args, "tmux", "new-session", "-s", "gswarm", strings.Join(geminiArgs, " "))
+		// When using tmux, we pass a single string as the command to new-session.
+		// We must quote the task to ensure it's treated as one argument by the shell inside tmux.
+		geminiCmd := fmt.Sprintf("gemini --yolo --prompt-interactive %q", config.Task)
+		args = append(args, "tmux", "new-session", "-s", "gswarm", geminiCmd)
 	} else {
-		args = append(args, geminiArgs...)
+		// When not using tmux, we pass arguments directly to container run.
+		args = append(args, "gemini", "--yolo", "--prompt-interactive", config.Task)
 	}
 
 	if os.Getenv("GSWARM_DEBUG") != "" {
