@@ -11,6 +11,7 @@ type AgentInfo struct {
 	Name        string
 	Grove       string
 	GrovePath   string
+	Labels      map[string]string
 	Status      string // Container status
 	AgentStatus string // Scion agent high-level status
 	Image       string
