@@ -5,6 +5,9 @@
       "selectedType": "gemini-api-key"
     }
   },
+  "model": {
+    "skipNextSpeakerCheck": true
+  },
 	"telemetry": {
     "enabled": false
   },
