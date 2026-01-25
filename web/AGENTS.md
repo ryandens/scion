@@ -118,6 +118,44 @@ web/
 | `NODE_ENV` | `development` | Environment mode |
 | `HUB_API_URL` | `http://localhost:9810` | Hub API endpoint |
 | `SCION_API_DEBUG` | `false` | Enable debug logging (verbose request/response logs) |
+| `SCION_DEV_TOKEN` | - | Explicit dev token (overrides file) |
+| `SCION_DEV_TOKEN_FILE` | `~/.scion/dev-token` | Path to dev token file |
+| `SCION_DEV_AUTH_ENABLED` | `true` in dev | Enable/disable dev auth |
+
+## Development Authentication
+
+The web frontend supports automatic development authentication when running locally. This provides a seamless developer experience without needing to set up OAuth.
+
+### How It Works
+
+1. When the server starts in development mode (non-production), it looks for a dev token:
+   - First from `SCION_DEV_TOKEN` environment variable
+   - Then from `~/.scion/dev-token` file
+
+2. If a token is found:
+   - The user is automatically logged in as "Development User" (`dev@localhost`)
+   - API proxy requests include the dev token in the `Authorization` header
+   - The UI shows the logged-in user with a dropdown menu
+
+3. The Hub API generates the dev token on startup. The token is saved to `~/.scion/dev-token`.
+
+### Testing Dev Auth
+
+```bash
+# If Hub is running and created the token:
+cat ~/.scion/dev-token
+
+# Or create a test token manually:
+echo "scion_dev_testtoken12345678901234567890abcd" > ~/.scion/dev-token
+chmod 600 ~/.scion/dev-token
+
+# Start the web frontend
+npm run build && npm start
+```
+
+The server will show a warning banner confirming dev auth is enabled with the auto-login user.
+
+See [dev-auth design](../.design/hosted/dev-auth.md) for the complete specification.
 
 ## Milestone Progress
 

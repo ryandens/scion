@@ -13,7 +13,7 @@ import { resolve } from 'path';
 import { fileURLToPath } from 'url';
 
 import type { AppConfig } from './config.js';
-import { errorHandler, logger, security } from './middleware/index.js';
+import { errorHandler, logger, security, initDevAuth } from './middleware/index.js';
 import { healthRoutes, pageRoutes, createApiRouter } from './routes/index.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
@@ -45,6 +45,10 @@ export function createApp(config: AppConfig): Koa {
 
   // Body parsing for JSON requests
   app.use(bodyParser());
+
+  // Dev auth middleware (auto-login for development)
+  const devAuth = initDevAuth();
+  app.use(devAuth.middleware);
 
   // Static asset serving from public/ directory
   // Path is relative to compiled location: dist/server/server/app.js

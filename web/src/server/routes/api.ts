@@ -37,9 +37,12 @@ export function createApiRouter(config: AppConfig): Router {
         'X-Forwarded-For': ctx.ip,
       };
 
-      // Forward authorization if present
+      // Forward authorization if present, or use dev token
       if (ctx.headers.authorization) {
         headers['Authorization'] = ctx.headers.authorization;
+      } else if (ctx.state.devToken) {
+        // Inject dev token for development authentication
+        headers['Authorization'] = `Bearer ${ctx.state.devToken}`;
       }
 
       // Forward cookies if present (for session-based auth)
