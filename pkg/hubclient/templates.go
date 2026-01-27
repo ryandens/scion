@@ -7,6 +7,9 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/ptone/scion-agent/pkg/apiclient"
@@ -268,7 +271,13 @@ func (s *templateService) RequestDownloadURLs(ctx context.Context, templateID st
 }
 
 // UploadFile uploads a file to the given signed URL.
+// For local storage (file:// URLs), this writes directly to the filesystem.
 func (s *templateService) UploadFile(ctx context.Context, signedURL string, method string, headers map[string]string, content io.Reader) error {
+	// Handle file:// URLs for local storage
+	if strings.HasPrefix(signedURL, "file://") {
+		return s.uploadToFile(signedURL, content)
+	}
+
 	if method == "" {
 		method = http.MethodPut
 	}
@@ -311,8 +320,40 @@ func (s *templateService) UploadFile(ctx context.Context, signedURL string, meth
 	return nil
 }
 
+// uploadToFile writes content directly to a file path from a file:// URL.
+func (s *templateService) uploadToFile(fileURL string, content io.Reader) error {
+	// Parse file:// URL to get path
+	path := strings.TrimPrefix(fileURL, "file://")
+
+	// Ensure parent directory exists
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("failed to create directory %s: %w", dir, err)
+	}
+
+	// Create and write file
+	f, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("failed to create file %s: %w", path, err)
+	}
+	defer f.Close()
+
+	if _, err := io.Copy(f, content); err != nil {
+		return fmt.Errorf("failed to write file %s: %w", path, err)
+	}
+
+	return nil
+}
+
 // DownloadFile downloads a file from the given signed URL.
+// For local storage (file:// URLs), this reads directly from the filesystem.
 func (s *templateService) DownloadFile(ctx context.Context, signedURL string) ([]byte, error) {
+	// Handle file:// URLs for local storage
+	if strings.HasPrefix(signedURL, "file://") {
+		path := strings.TrimPrefix(signedURL, "file://")
+		return os.ReadFile(path)
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, signedURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)

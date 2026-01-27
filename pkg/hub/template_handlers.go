@@ -503,8 +503,15 @@ func (s *Server) handleTemplateUpload(w http.ResponseWriter, r *http.Request, id
 		return
 	}
 
+	// Check that template has a valid storage path
+	if template.StoragePath == "" {
+		RuntimeError(w, "Template storage path not configured (template ID: "+id+", scope: "+template.Scope+", scopeID: "+template.ScopeID+")")
+		return
+	}
+
 	// Generate upload URLs
 	uploadURLs := make([]UploadURLInfo, 0, len(req.Files))
+	var lastErr error
 	for _, file := range req.Files {
 		objectPath := template.StoragePath + "/" + file.Path
 		signedURL, err := stor.GenerateSignedURL(ctx, objectPath, storage.SignedURLOptions{
@@ -512,6 +519,7 @@ func (s *Server) handleTemplateUpload(w http.ResponseWriter, r *http.Request, id
 			Expires: SignedURLExpiry,
 		})
 		if err != nil {
+			lastErr = err
 			continue
 		}
 		uploadURLs = append(uploadURLs, UploadURLInfo{
@@ -521,6 +529,16 @@ func (s *Server) handleTemplateUpload(w http.ResponseWriter, r *http.Request, id
 			Headers: signedURL.Headers,
 			Expires: signedURL.Expires,
 		})
+	}
+
+	// If we couldn't generate any upload URLs, return an error
+	if len(uploadURLs) == 0 && len(req.Files) > 0 {
+		if lastErr != nil {
+			RuntimeError(w, "Failed to generate upload URLs: "+lastErr.Error())
+		} else {
+			RuntimeError(w, "Failed to generate upload URLs")
+		}
+		return
 	}
 
 	// Generate manifest URL
