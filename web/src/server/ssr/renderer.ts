@@ -26,7 +26,9 @@ import '../../components/shared/status-badge.js';
 // Page components
 import '../../components/pages/home.js';
 import '../../components/pages/groves.js';
+import '../../components/pages/grove-detail.js';
 import '../../components/pages/agents.js';
+import '../../components/pages/agent-detail.js';
 import '../../components/pages/not-found.js';
 import '../../components/pages/login.js';
 
@@ -135,8 +137,48 @@ function getPageTemplate(url: string, pageData: PageData): TemplateResult {
     return html`<scion-page-groves .pageData=${pageData}></scion-page-groves>`;
   }
 
+  // Grove detail: /groves/:groveId
+  const groveDetailMatch = url.match(/^\/groves\/([^/]+)$/);
+  if (groveDetailMatch) {
+    const groveId = groveDetailMatch[1];
+    return html`<scion-page-grove-detail
+      .pageData=${pageData}
+      .groveId=${groveId}
+    ></scion-page-grove-detail>`;
+  }
+
+  // Grove agents: /groves/:groveId/agents (redirect to grove detail)
+  const groveAgentsMatch = url.match(/^\/groves\/([^/]+)\/agents$/);
+  if (groveAgentsMatch) {
+    const groveId = groveAgentsMatch[1];
+    return html`<scion-page-grove-detail
+      .pageData=${pageData}
+      .groveId=${groveId}
+    ></scion-page-grove-detail>`;
+  }
+
   if (url === '/agents') {
     return html`<scion-page-agents .pageData=${pageData}></scion-page-agents>`;
+  }
+
+  // Agent terminal: /agents/:agentId/terminal (placeholder - will be implemented in M8)
+  const terminalMatch = url.match(/^\/agents\/([^/]+)\/terminal$/);
+  if (terminalMatch) {
+    const agentId = terminalMatch[1];
+    return html`<scion-page-agent-detail
+      .pageData=${pageData}
+      .agentId=${agentId}
+    ></scion-page-agent-detail>`;
+  }
+
+  // Agent detail: /agents/:agentId
+  const agentDetailMatch = url.match(/^\/agents\/([^/]+)$/);
+  if (agentDetailMatch) {
+    const agentId = agentDetailMatch[1];
+    return html`<scion-page-agent-detail
+      .pageData=${pageData}
+      .agentId=${agentId}
+    ></scion-page-agent-detail>`;
   }
 
   // 404 for unmatched routes

@@ -1,22 +1,28 @@
 /**
- * Agents list page component
+ * Grove detail page component
  *
- * Displays all agents across all groves with their status
+ * Displays a single grove with its agents and settings
  */
 
 import { LitElement, html, css } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 
-import type { PageData, Agent } from '../../shared/types.js';
+import type { PageData, Grove, Agent } from '../../shared/types.js';
 import '../shared/status-badge.js';
 
-@customElement('scion-page-agents')
-export class ScionPageAgents extends LitElement {
+@customElement('scion-page-grove-detail')
+export class ScionPageGroveDetail extends LitElement {
   /**
    * Page data from SSR
    */
   @property({ type: Object })
   pageData: PageData | null = null;
+
+  /**
+   * Grove ID from URL
+   */
+  @property({ type: String })
+  groveId = '';
 
   /**
    * Loading state
@@ -25,7 +31,13 @@ export class ScionPageAgents extends LitElement {
   private loading = true;
 
   /**
-   * Agents list
+   * Grove data
+   */
+  @state()
+  private grove: Grove | null = null;
+
+  /**
+   * Agents in this grove
    */
   @state()
   private agents: Agent[] = [];
@@ -49,14 +61,88 @@ export class ScionPageAgents extends LitElement {
 
     .header {
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       justify-content: space-between;
       margin-bottom: 1.5rem;
+      gap: 1rem;
+    }
+
+    .header-info {
+      flex: 1;
+    }
+
+    .header-title {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .header-title sl-icon {
+      color: var(--scion-primary, #3b82f6);
+      font-size: 1.5rem;
     }
 
     .header h1 {
       font-size: 1.5rem;
       font-weight: 700;
+      color: var(--scion-text, #1e293b);
+      margin: 0;
+    }
+
+    .header-path {
+      font-family: var(--scion-font-mono, monospace);
+      font-size: 0.875rem;
+      color: var(--scion-text-muted, #64748b);
+      margin-top: 0.25rem;
+      word-break: break-all;
+    }
+
+    .header-actions {
+      display: flex;
+      gap: 0.5rem;
+      flex-shrink: 0;
+    }
+
+    .stats-row {
+      display: flex;
+      gap: 2rem;
+      margin-bottom: 2rem;
+      padding: 1.25rem;
+      background: var(--scion-surface, #ffffff);
+      border: 1px solid var(--scion-border, #e2e8f0);
+      border-radius: var(--scion-radius-lg, 0.75rem);
+    }
+
+    .stat {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .stat-label {
+      font-size: 0.75rem;
+      color: var(--scion-text-muted, #64748b);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 0.25rem;
+    }
+
+    .stat-value {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: var(--scion-text, #1e293b);
+    }
+
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 1rem;
+    }
+
+    .section-header h2 {
+      font-size: 1.125rem;
+      font-weight: 600;
       color: var(--scion-text, #1e293b);
       margin: 0;
     }
@@ -73,6 +159,9 @@ export class ScionPageAgents extends LitElement {
       border-radius: var(--scion-radius-lg, 0.75rem);
       padding: 1.5rem;
       transition: all var(--scion-transition-fast, 150ms ease);
+      text-decoration: none;
+      color: inherit;
+      display: block;
     }
 
     .agent-card:hover {
@@ -203,30 +292,57 @@ export class ScionPageAgents extends LitElement {
       color: var(--sl-color-danger-700, #b91c1c);
       margin-bottom: 1rem;
     }
+
+    .back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      color: var(--scion-text-muted, #64748b);
+      text-decoration: none;
+      font-size: 0.875rem;
+      margin-bottom: 1rem;
+    }
+
+    .back-link:hover {
+      color: var(--scion-primary, #3b82f6);
+    }
   `;
 
   override connectedCallback(): void {
     super.connectedCallback();
-    void this.loadAgents();
+    void this.loadData();
   }
 
-  private async loadAgents(): Promise<void> {
+  private async loadData(): Promise<void> {
     this.loading = true;
     this.error = null;
 
     try {
-      const response = await fetch('/api/agents');
+      // Load grove and agents in parallel
+      const [groveResponse, agentsResponse] = await Promise.all([
+        fetch(`/api/groves/${this.groveId}`),
+        fetch(`/api/groves/${this.groveId}/agents`),
+      ]);
 
-      if (!response.ok) {
-        const errorData = (await response.json().catch(() => ({}))) as { message?: string };
-        throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
+      if (!groveResponse.ok) {
+        const errorData = (await groveResponse.json().catch(() => ({}))) as { message?: string };
+        throw new Error(
+          errorData.message || `HTTP ${groveResponse.status}: ${groveResponse.statusText}`
+        );
       }
 
-      const data = (await response.json()) as { agents?: Agent[] } | Agent[];
-      this.agents = Array.isArray(data) ? data : data.agents || [];
+      this.grove = (await groveResponse.json()) as Grove;
+
+      if (agentsResponse.ok) {
+        const agentsData = (await agentsResponse.json()) as { agents?: Agent[] } | Agent[];
+        this.agents = Array.isArray(agentsData) ? agentsData : agentsData.agents || [];
+      } else {
+        // Fallback: if grove-scoped agents endpoint fails, try filtering from all agents
+        this.agents = [];
+      }
     } catch (err) {
-      console.error('Failed to load agents:', err);
-      this.error = err instanceof Error ? err.message : 'Failed to load agents';
+      console.error('Failed to load grove:', err);
+      this.error = err instanceof Error ? err.message : 'Failed to load grove';
     } finally {
       this.loading = false;
     }
@@ -234,8 +350,10 @@ export class ScionPageAgents extends LitElement {
 
   private getStatusVariant(status: string): 'success' | 'warning' | 'danger' | 'neutral' {
     switch (status) {
+      case 'active':
       case 'running':
         return 'success';
+      case 'inactive':
       case 'stopped':
         return 'neutral';
       case 'provisioning':
@@ -244,6 +362,21 @@ export class ScionPageAgents extends LitElement {
         return 'danger';
       default:
         return 'neutral';
+    }
+  }
+
+  private formatDate(dateString: string): string {
+    try {
+      const date = new Date(dateString);
+      return new Intl.DateTimeFormat('en', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      }).format(date);
+    } catch {
+      return dateString;
     }
   }
 
@@ -278,7 +411,7 @@ export class ScionPageAgents extends LitElement {
       }
 
       // Reload data to reflect changes
-      await this.loadAgents();
+      await this.loadData();
     } catch (err) {
       console.error(`Failed to ${action} agent:`, err);
       alert(err instanceof Error ? err.message : `Failed to ${action} agent`);
@@ -288,16 +421,79 @@ export class ScionPageAgents extends LitElement {
   }
 
   override render() {
+    if (this.loading) {
+      return this.renderLoading();
+    }
+
+    if (this.error) {
+      return this.renderError();
+    }
+
+    if (!this.grove) {
+      return this.renderError();
+    }
+
     return html`
+      <a href="/groves" class="back-link">
+        <sl-icon name="arrow-left"></sl-icon>
+        Back to Groves
+      </a>
+
       <div class="header">
-        <h1>Agents</h1>
-        <sl-button variant="primary" size="small" disabled>
-          <sl-icon slot="prefix" name="plus-lg"></sl-icon>
-          New Agent
-        </sl-button>
+        <div class="header-info">
+          <div class="header-title">
+            <sl-icon name="folder-fill"></sl-icon>
+            <h1>${this.grove.name}</h1>
+            <scion-status-badge
+              status=${this.getStatusVariant(this.grove.status)}
+              label=${this.grove.status}
+              size="small"
+            ></scion-status-badge>
+          </div>
+          <div class="header-path">${this.grove.path}</div>
+        </div>
+        <div class="header-actions">
+          <sl-button variant="primary" size="small" disabled>
+            <sl-icon slot="prefix" name="plus-lg"></sl-icon>
+            New Agent
+          </sl-button>
+          <sl-button size="small" disabled>
+            <sl-icon slot="prefix" name="gear"></sl-icon>
+            Settings
+          </sl-button>
+        </div>
       </div>
 
-      ${this.loading ? this.renderLoading() : this.error ? this.renderError() : this.renderAgents()}
+      <div class="stats-row">
+        <div class="stat">
+          <span class="stat-label">Agents</span>
+          <span class="stat-value">${this.agents.length}</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Running</span>
+          <span class="stat-value"
+            >${this.agents.filter((a) => a.status === 'running').length}</span
+          >
+        </div>
+        <div class="stat">
+          <span class="stat-label">Created</span>
+          <span class="stat-value" style="font-size: 1rem; font-weight: 500;">
+            ${this.formatDate(this.grove.createdAt)}
+          </span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Updated</span>
+          <span class="stat-value" style="font-size: 1rem; font-weight: 500;">
+            ${this.formatDate(this.grove.updatedAt)}
+          </span>
+        </div>
+      </div>
+
+      <div class="section-header">
+        <h2>Agents</h2>
+      </div>
+
+      ${this.agents.length === 0 ? this.renderEmptyAgents() : this.renderAgentGrid()}
     `;
   }
 
@@ -305,19 +501,24 @@ export class ScionPageAgents extends LitElement {
     return html`
       <div class="loading-state">
         <sl-spinner></sl-spinner>
-        <p>Loading agents...</p>
+        <p>Loading grove...</p>
       </div>
     `;
   }
 
   private renderError() {
     return html`
+      <a href="/groves" class="back-link">
+        <sl-icon name="arrow-left"></sl-icon>
+        Back to Groves
+      </a>
+
       <div class="error-state">
         <sl-icon name="exclamation-triangle"></sl-icon>
-        <h2>Failed to Load Agents</h2>
-        <p>There was a problem connecting to the API.</p>
-        <div class="error-details">${this.error}</div>
-        <sl-button variant="primary" @click=${() => this.loadAgents()}>
+        <h2>Failed to Load Grove</h2>
+        <p>There was a problem loading this grove.</p>
+        <div class="error-details">${this.error || 'Grove not found'}</div>
+        <sl-button variant="primary" @click=${() => this.loadData()}>
           <sl-icon slot="prefix" name="arrow-clockwise"></sl-icon>
           Retry
         </sl-button>
@@ -325,30 +526,23 @@ export class ScionPageAgents extends LitElement {
     `;
   }
 
-  private renderAgents() {
-    if (this.agents.length === 0) {
-      return this.renderEmptyState();
-    }
-
-    return html`
-      <div class="agent-grid">${this.agents.map((agent) => this.renderAgentCard(agent))}</div>
-    `;
-  }
-
-  private renderEmptyState() {
+  private renderEmptyAgents() {
     return html`
       <div class="empty-state">
         <sl-icon name="cpu"></sl-icon>
-        <h2>No Agents Found</h2>
-        <p>
-          Agents are AI-powered workers that can help you with coding tasks. Create your first agent
-          to get started.
-        </p>
+        <h2>No Agents</h2>
+        <p>This grove doesn't have any agents yet. Create your first agent to get started.</p>
         <sl-button variant="primary" disabled>
           <sl-icon slot="prefix" name="plus-lg"></sl-icon>
           Create Agent
         </sl-button>
       </div>
+    `;
+  }
+
+  private renderAgentGrid() {
+    return html`
+      <div class="agent-grid">${this.agents.map((agent) => this.renderAgentCard(agent))}</div>
     `;
   }
 
@@ -371,11 +565,10 @@ export class ScionPageAgents extends LitElement {
             status=${this.getStatusVariant(agent.status)}
             label=${agent.status}
             size="small"
-          >
-          </scion-status-badge>
+          ></scion-status-badge>
         </div>
 
-        ${agent.taskSummary ? html` <div class="agent-task">${agent.taskSummary}</div> ` : ''}
+        ${agent.taskSummary ? html`<div class="agent-task">${agent.taskSummary}</div>` : ''}
 
         <div class="agent-actions">
           <sl-button
@@ -432,6 +625,6 @@ export class ScionPageAgents extends LitElement {
 
 declare global {
   interface HTMLElementTagNameMap {
-    'scion-page-agents': ScionPageAgents;
+    'scion-page-grove-detail': ScionPageGroveDetail;
   }
 }

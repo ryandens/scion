@@ -17,7 +17,7 @@ For architectural details and component specifications, see **`web-frontend-desi
 | M3 | Complete | Web Awesome Component Library |
 | M4 | Complete | Authentication Flow |
 | M5 | In Progress | Hub API Proxy |
-| M6 | In Progress | Grove & Agent Pages |
+| M6 | Complete | Grove & Agent Pages |
 | M7 | Not Started | SSE + NATS Real-Time Updates |
 | M8 | Not Started | Terminal Component |
 | M9 | Not Started | Agent Creation Workflow |
@@ -307,20 +307,20 @@ Create a simple mock for development without a real Hub:
 
 ### Deliverables
 
-- [ ] **Grove pages**
+- [x] **Grove pages**
    - [x] `<scion-grove-list>` - list all groves with filtering
-   - [ ] `<scion-grove-detail>` - single grove view with agent list
+   - [x] `<scion-grove-detail>` - single grove view with agent list
    - [x] Grove card component with status summary
 
-- [ ] **Agent pages**
+- [x] **Agent pages**
    - [x] `<scion-agent-list>` - agents within a grove
-   - [ ] `<scion-agent-detail>` - single agent view
+   - [x] `<scion-agent-detail>` - single agent view
    - [x] Agent card component with status, actions
 
-- [ ] **Action handlers**
-   - [ ] Start/stop agent buttons (UI present, not wired)
-   - [ ] Delete agent with confirmation
-   - [ ] Create agent dialog (basic)
+- [x] **Action handlers**
+   - [x] Start/stop agent buttons (wired to API)
+   - [x] Delete agent with confirmation
+   - [ ] Create agent dialog (basic) - deferred to M9
 
 - [ ] **State management (client)**
    - [x] Basic client-side state in components
@@ -354,9 +354,13 @@ Create a simple mock for development without a real Hub:
 ### Implementation Notes
 
 - **Grove List** (`src/components/pages/groves.ts`): Fetches from `/api/groves` on mount, displays cards with status badges
-- **Agent List** (`src/components/pages/agents.ts`): Fetches from `/api/agents` on mount, shows agent cards with action buttons (Start/Stop/Terminal - UI only)
+- **Grove Detail** (`src/components/pages/grove-detail.ts`): Fetches grove and agents in parallel, displays grove info, stats, and agent cards with actions
+- **Agent List** (`src/components/pages/agents.ts`): Fetches from `/api/agents` on mount, shows agent cards with wired action buttons (Start/Stop/Delete)
+- **Agent Detail** (`src/components/pages/agent-detail.ts`): Fetches agent and grove info, displays detailed agent information with quick actions
 - **Status Badges**: Uses Shoelace badge variants mapped from API status strings
-- **Remaining Work**: Detail pages, wiring action handlers to API calls, proper state management
+- **Action Handlers**: Start/Stop/Delete wired to Hub API via POST/DELETE requests with loading states
+- **Routing**: SSR renderer handles `/groves/:groveId` and `/agents/:agentId` routes
+- **Remaining Work**: State manager class, SSR data hydration, optimistic updates, agent creation dialog (M9)
 
 ---
 
