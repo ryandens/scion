@@ -400,7 +400,62 @@ When OAuth authentication is fully implemented:
 
 ---
 
-## 3. Hub API Auth Endpoints
+## 3. Domain Authorization
+
+Scion supports restricting authentication to specific email domains. This provides an additional layer of access control beyond OAuth authentication.
+
+### 3.1 Configuration
+
+Set the `SCION_AUTHORIZED_DOMAINS` environment variable with a comma-separated list of allowed domains:
+
+```bash
+# Allow users from specific email domains
+export SCION_AUTHORIZED_DOMAINS="example.com,mycompany.org"
+
+# Leave empty to allow all domains (default)
+export SCION_AUTHORIZED_DOMAINS=""
+```
+
+Alternatively, configure via `server.yaml`:
+
+```yaml
+auth:
+  authorizedDomains:
+    - example.com
+    - mycompany.org
+```
+
+**Environment Variable Mapping:**
+
+| Variable | Maps To |
+|----------|---------|
+| `SCION_AUTHORIZED_DOMAINS` | `auth.authorizedDomains` |
+
+### 3.2 How It Works
+
+Domain authorization is enforced at multiple layers for defense in depth:
+
+1. **Web Frontend**: After OAuth callback, the frontend checks the user's email domain before creating a session
+2. **Hub API**: The `/api/v1/auth/login` and `/api/v1/auth/cli/token` endpoints verify the email domain before issuing tokens
+
+If a user's email domain is not in the authorized list, they receive a "your email domain is not authorized" error.
+
+### 3.3 Behavior
+
+- **Empty list**: All email domains are allowed (default)
+- **Non-empty list**: Only emails from listed domains can authenticate
+- **Case insensitive**: Domain matching is case-insensitive (`Example.COM` matches `example.com`)
+- **Exact match**: Subdomains are not automatically included (`sub.example.com` does NOT match `example.com`)
+
+### 3.4 Security Considerations
+
+- Domain authorization is checked after OAuth authentication succeeds, so the OAuth provider validates the user's identity first
+- Both web and API layers enforce the check, providing defense in depth
+- Authorized domains should be kept to a minimum to reduce attack surface
+
+---
+
+## 4. Hub API Auth Endpoints
 
 ### 3.1 OAuth Initiation (for CLI)
 
