@@ -507,7 +507,7 @@ func (s *SQLiteStore) GetAgent(ctx context.Context, id string) (*store.Agent, er
 	agent := &store.Agent{}
 	var labels, annotations, appliedConfig string
 	var lastSeen sql.NullTime
-	var runtimeHostID sql.NullString
+	var runtimeHostID, message sql.NullString
 
 	err := s.db.QueryRowContext(ctx, `
 		SELECT id, agent_id, name, template, grove_id,
@@ -522,7 +522,7 @@ func (s *SQLiteStore) GetAgent(ctx context.Context, id string) (*store.Agent, er
 		&agent.ID, &agent.AgentID, &agent.Name, &agent.Template, &agent.GroveID,
 		&labels, &annotations,
 		&agent.Status, &agent.ConnectionState, &agent.ContainerStatus, &agent.SessionStatus, &agent.RuntimeState,
-		&agent.Image, &agent.Detached, &agent.Runtime, &runtimeHostID, &agent.WebPTYEnabled, &agent.TaskSummary, &agent.Message,
+		&agent.Image, &agent.Detached, &agent.Runtime, &runtimeHostID, &agent.WebPTYEnabled, &agent.TaskSummary, &message,
 		&appliedConfig,
 		&agent.Created, &agent.Updated, &lastSeen,
 		&agent.CreatedBy, &agent.OwnerID, &agent.Visibility, &agent.StateVersion,
@@ -543,6 +543,9 @@ func (s *SQLiteStore) GetAgent(ctx context.Context, id string) (*store.Agent, er
 	if runtimeHostID.Valid {
 		agent.RuntimeHostID = runtimeHostID.String
 	}
+	if message.Valid {
+		agent.Message = message.String
+	}
 
 	return agent, nil
 }
@@ -551,7 +554,7 @@ func (s *SQLiteStore) GetAgentBySlug(ctx context.Context, groveID, slug string) 
 	agent := &store.Agent{}
 	var labels, annotations, appliedConfig string
 	var lastSeen sql.NullTime
-	var runtimeHostID sql.NullString
+	var runtimeHostID, message sql.NullString
 
 	err := s.db.QueryRowContext(ctx, `
 		SELECT id, agent_id, name, template, grove_id,
@@ -566,7 +569,7 @@ func (s *SQLiteStore) GetAgentBySlug(ctx context.Context, groveID, slug string) 
 		&agent.ID, &agent.AgentID, &agent.Name, &agent.Template, &agent.GroveID,
 		&labels, &annotations,
 		&agent.Status, &agent.ConnectionState, &agent.ContainerStatus, &agent.SessionStatus, &agent.RuntimeState,
-		&agent.Image, &agent.Detached, &agent.Runtime, &runtimeHostID, &agent.WebPTYEnabled, &agent.TaskSummary, &agent.Message,
+		&agent.Image, &agent.Detached, &agent.Runtime, &runtimeHostID, &agent.WebPTYEnabled, &agent.TaskSummary, &message,
 		&appliedConfig,
 		&agent.Created, &agent.Updated, &lastSeen,
 		&agent.CreatedBy, &agent.OwnerID, &agent.Visibility, &agent.StateVersion,
@@ -586,6 +589,9 @@ func (s *SQLiteStore) GetAgentBySlug(ctx context.Context, groveID, slug string) 
 	}
 	if runtimeHostID.Valid {
 		agent.RuntimeHostID = runtimeHostID.String
+	}
+	if message.Valid {
+		agent.Message = message.String
 	}
 
 	return agent, nil
@@ -717,13 +723,13 @@ func (s *SQLiteStore) ListAgents(ctx context.Context, filter store.AgentFilter, 
 		var agent store.Agent
 		var labels, annotations, appliedConfig string
 		var lastSeen sql.NullTime
-		var runtimeHostID sql.NullString
+		var runtimeHostID, message sql.NullString
 
 		if err := rows.Scan(
 			&agent.ID, &agent.AgentID, &agent.Name, &agent.Template, &agent.GroveID,
 			&labels, &annotations,
 			&agent.Status, &agent.ConnectionState, &agent.ContainerStatus, &agent.SessionStatus, &agent.RuntimeState,
-			&agent.Image, &agent.Detached, &agent.Runtime, &runtimeHostID, &agent.WebPTYEnabled, &agent.TaskSummary, &agent.Message,
+			&agent.Image, &agent.Detached, &agent.Runtime, &runtimeHostID, &agent.WebPTYEnabled, &agent.TaskSummary, &message,
 			&appliedConfig,
 			&agent.Created, &agent.Updated, &lastSeen,
 			&agent.CreatedBy, &agent.OwnerID, &agent.Visibility, &agent.StateVersion,
@@ -739,6 +745,9 @@ func (s *SQLiteStore) ListAgents(ctx context.Context, filter store.AgentFilter, 
 		}
 		if runtimeHostID.Valid {
 			agent.RuntimeHostID = runtimeHostID.String
+		}
+		if message.Valid {
+			agent.Message = message.String
 		}
 
 		agents = append(agents, agent)
