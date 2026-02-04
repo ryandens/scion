@@ -2,6 +2,7 @@ package hubsync
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"github.com/ptone/scion-agent/pkg/credentials"
 	"github.com/ptone/scion-agent/pkg/hubclient"
 	"github.com/ptone/scion-agent/pkg/util"
+	"gopkg.in/yaml.v3"
 )
 
 // debugf prints a debug message if debug mode is enabled.
@@ -132,6 +134,13 @@ func EnsureHubReady(grovePath string, opts EnsureHubReadyOptions) (*HubContext, 
 	if grovePath == "" && isGlobal {
 		debugf("No project grove found (fell back to global), skipping Hub sync")
 		return nil, nil
+	}
+
+	// Clean up stale host credentials from grove settings.
+	// These should only exist in global settings, not grove-specific settings.
+	// Earlier versions incorrectly wrote them to grove settings.
+	if !isGlobal {
+		cleanupGroveHostCredentials(resolvedPath)
 	}
 
 	settings, err := config.LoadSettings(resolvedPath)
@@ -533,15 +542,21 @@ func registerGrove(ctx context.Context, hubCtx *HubContext, groveName string, is
 		return err
 	}
 
-	// Save the host token and ID
-	if resp.HostToken != "" {
-		if err := config.UpdateSetting(hubCtx.GrovePath, "hub.hostToken", resp.HostToken, isGlobal); err != nil {
-			fmt.Printf("Warning: failed to save host token: %v\n", err)
+	// Save the host token and ID to GLOBAL settings only.
+	// These are host-level credentials, not grove-specific.
+	globalDir, globalErr := config.GetGlobalDir()
+	if globalErr != nil {
+		fmt.Printf("Warning: failed to get global directory: %v\n", globalErr)
+	} else {
+		if resp.HostToken != "" {
+			if err := config.UpdateSetting(globalDir, "hub.hostToken", resp.HostToken, true); err != nil {
+				fmt.Printf("Warning: failed to save host token: %v\n", err)
+			}
 		}
-	}
-	if resp.Host != nil && resp.Host.ID != "" {
-		if err := config.UpdateSetting(hubCtx.GrovePath, "hub.hostId", resp.Host.ID, isGlobal); err != nil {
-			fmt.Printf("Warning: failed to save host ID: %v\n", err)
+		if resp.Host != nil && resp.Host.ID != "" {
+			if err := config.UpdateSetting(globalDir, "hub.hostId", resp.Host.ID, true); err != nil {
+				fmt.Printf("Warning: failed to save host ID: %v\n", err)
+			}
 		}
 	}
 
@@ -630,4 +645,83 @@ func wrapHubError(err error) error {
 // containsIgnoreCase checks if a string contains a substring (case-insensitive).
 func containsIgnoreCase(s, substr string) bool {
 	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
+}
+
+// cleanupGroveHostCredentials removes stale hub.hostId and hub.hostToken from
+// grove settings. These should only exist in global settings, not grove-specific.
+// Earlier versions of scion incorrectly wrote them to grove settings.
+func cleanupGroveHostCredentials(grovePath string) {
+	settingsPath := config.GetSettingsPath(grovePath)
+	if settingsPath == "" {
+		return
+	}
+
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		return
+	}
+
+	// Check if the file contains hostId or hostToken
+	content := string(data)
+	if !strings.Contains(content, "hostId") && !strings.Contains(content, "hostToken") {
+		return
+	}
+
+	// Parse and check if hub section has these keys
+	var settings map[string]interface{}
+	ext := filepath.Ext(settingsPath)
+	isYAML := ext == ".yaml" || ext == ".yml"
+
+	if isYAML {
+		if err := yaml.Unmarshal(data, &settings); err != nil {
+			debugf("Warning: failed to parse grove settings YAML: %v", err)
+			return
+		}
+	} else {
+		if err := util.UnmarshalJSONC(data, &settings); err != nil {
+			debugf("Warning: failed to parse grove settings JSON: %v", err)
+			return
+		}
+	}
+
+	hubSection, ok := settings["hub"].(map[string]interface{})
+	if !ok {
+		return
+	}
+
+	modified := false
+	if _, hasHostId := hubSection["hostId"]; hasHostId {
+		delete(hubSection, "hostId")
+		modified = true
+		debugf("Removed stale hub.hostId from grove settings")
+	}
+	if _, hasHostToken := hubSection["hostToken"]; hasHostToken {
+		delete(hubSection, "hostToken")
+		modified = true
+		debugf("Removed stale hub.hostToken from grove settings")
+	}
+
+	if !modified {
+		return
+	}
+
+	// Write back the cleaned settings in the same format
+	var newData []byte
+	if isYAML {
+		newData, err = yaml.Marshal(settings)
+		if err != nil {
+			debugf("Warning: failed to marshal cleaned settings as YAML: %v", err)
+			return
+		}
+	} else {
+		newData, err = json.MarshalIndent(settings, "", "  ")
+		if err != nil {
+			debugf("Warning: failed to marshal cleaned settings as JSON: %v", err)
+			return
+		}
+	}
+
+	if err := os.WriteFile(settingsPath, newData, 0644); err != nil {
+		debugf("Warning: failed to write cleaned settings: %v", err)
+	}
 }

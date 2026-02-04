@@ -209,12 +209,18 @@ func promptHubRegistration(isGlobal bool) error {
 			return fmt.Errorf("registration failed: %w", err)
 		}
 
-		// Save credentials
-		if resp.HostToken != "" {
-			_ = config.UpdateSetting(resolvedPath, "hub.hostToken", resp.HostToken, isGlobal)
-		}
-		if resp.Host != nil && resp.Host.ID != "" {
-			_ = config.UpdateSetting(resolvedPath, "hub.hostId", resp.Host.ID, isGlobal)
+		// Save host credentials to GLOBAL settings only.
+		// These are host-level credentials, not grove-specific.
+		globalDir, globalErr := config.GetGlobalDir()
+		if globalErr != nil {
+			fmt.Printf("Warning: failed to get global directory: %v\n", globalErr)
+		} else {
+			if resp.HostToken != "" {
+				_ = config.UpdateSetting(globalDir, "hub.hostToken", resp.HostToken, true)
+			}
+			if resp.Host != nil && resp.Host.ID != "" {
+				_ = config.UpdateSetting(globalDir, "hub.hostId", resp.Host.ID, true)
+			}
 		}
 
 		// Enable Hub integration

@@ -613,7 +613,7 @@ func runHubRegister(cmd *cobra.Command, args []string) error {
 
 func runHubDeregister(cmd *cobra.Command, args []string) error {
 	// Resolve grove path to find project settings
-	resolvedPath, isGlobal, err := config.ResolveGrovePath(grovePath)
+	resolvedPath, _, err := config.ResolveGrovePath(grovePath)
 	if err != nil {
 		return fmt.Errorf("failed to resolve grove path: %w", err)
 	}
@@ -641,9 +641,15 @@ func runHubDeregister(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("deregistration failed: %w", err)
 	}
 
-	// Clear the stored credentials
-	_ = config.UpdateSetting(resolvedPath, "hub.hostToken", "", isGlobal)
-	_ = config.UpdateSetting(resolvedPath, "hub.hostId", "", isGlobal)
+	// Clear the stored credentials from GLOBAL settings
+	// These are host-level credentials, not grove-specific.
+	globalDir, globalErr := config.GetGlobalDir()
+	if globalErr != nil {
+		fmt.Printf("Warning: failed to get global directory: %v\n", globalErr)
+	} else {
+		_ = config.UpdateSetting(globalDir, "hub.hostToken", "", true)
+		_ = config.UpdateSetting(globalDir, "hub.hostId", "", true)
+	}
 
 	fmt.Printf("Host %s deregistered from Hub\n", hostID)
 	return nil
