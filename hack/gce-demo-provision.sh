@@ -45,17 +45,19 @@ fi
 echo "=== Scion Demo Provisioning ==="
 
 # Prompt for size
-echo "Choose instance size:"
-echo "1) Small  (10s of agents)  - e2-standard-4 (4 vCPU, 16GB)"
-echo "2) Medium (100s of agents) - n2-standard-32 (32 vCPU, 128GB)"
-echo "3) Large  (~1000 agents)   - n2-standard-128 (128 vCPU, 512GB)"
-read -p "Select [1-3]: " SIZE_CHOICE
+if [[ -z "${SIZE_CHOICE:-}" ]]; then
+    echo "Choose instance size:"
+    echo "1) Small  (10s of agents)  - e2-standard-4 (4 vCPU, 16GB)"
+    echo "2) Medium (100s of agents) - n2-standard-32 (32 vCPU, 128GB)"
+    echo "3) Large  (~1000 agents)   - n2-standard-128 (128 vCPU, 512GB)"
+    read -p "Select [1-3]: " SIZE_CHOICE
+fi
 
 case $SIZE_CHOICE in
     1) MACHINE_TYPE="e2-standard-4" ;;
     2) MACHINE_TYPE="n2-standard-32" ;;
     3) MACHINE_TYPE="n2-standard-128" ;;
-    *) echo "Invalid choice"; exit 1 ;;
+    *) echo "Invalid choice: $SIZE_CHOICE"; exit 1 ;;
 esac
 
 echo "Selected Machine Type: ${MACHINE_TYPE}"
@@ -65,6 +67,9 @@ if ! gcloud iam service-accounts describe "${SERVICE_ACCOUNT_EMAIL}" &>/dev/null
     echo "Creating service account ${SERVICE_ACCOUNT_NAME}..."
     gcloud iam service-accounts create "${SERVICE_ACCOUNT_NAME}" \
         --display-name "Scion Demo Service Account"
+    
+    echo "Waiting for service account to propagate..."
+    sleep 10
     
     # Add basic roles (Logging and Monitoring)
     echo "Adding roles to service account..."
@@ -91,7 +96,7 @@ gcloud compute instances create "${INSTANCE_NAME}" \
     --zone="${ZONE}" \
     --machine-type="${MACHINE_TYPE}" \
     --network-interface=network-tier=PREMIUM,subnet=default \
-    --maintenance-policy=TERMINATE \
+    --maintenance-policy=MIGRATE \
     --provisioning-model=STANDARD \
     --service-account="${SERVICE_ACCOUNT_EMAIL}" \
     --scopes=https://www.googleapis.com/auth/cloud-platform \
