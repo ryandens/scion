@@ -236,12 +236,12 @@ func extractChildCommand(args []string) []string {
 
 // setupHostUser modifies the scion user's UID/GID to match the host user.
 // This is only done when running as root and SCION_HOST_UID/GID are set.
-// Returns the target UID/GID for the child process.
+// Returns the target UID/GID for the child process (0 = no change).
 func setupHostUser() (int, int) {
 	// Only run if we're root and env vars are set
 	if os.Getuid() != 0 {
 		log.Debug("Not running as root, skipping user setup")
-		return os.Getuid(), os.Getgid()
+		return 0, 0
 	}
 
 	hostUID := os.Getenv("SCION_HOST_UID")

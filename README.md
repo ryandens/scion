@@ -90,6 +90,21 @@ Profiles allow you to switch runtimes and configurations easily (e.g. `scion --p
 
 Templates serve as blueprints and can be managed via the `templates` subcommand. See the [Templates Guide](docs-site/src/content/docs/guides/templates.md) for more details.
 
+### Database
+
+The project uses SQLite for storage. Due to the high memory requirements of the pure-Go SQLite driver (`modernc.org/sqlite`) during analysis, you can optionally exclude it during development.
+
+- By default, SQLite support is included.
+- If you encounter OOM issues during `go vet` or `go test`, you can skip SQLite-related code:
+  ```bash
+  go test -tags no_sqlite ./...
+  go vet -tags no_sqlite ./...
+  ```
+- Standard builds produce a functional binary with SQLite support:
+  ```bash
+  go build ./cmd/scion
+  ```
+
 ## License
 
 This project is licensed under the Apache License, Version 2.0. See the [LICENSE](LICENSE) file for details.

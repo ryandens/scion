@@ -1,3 +1,5 @@
+//go:build !no_sqlite
+
 package hub
 
 import (
@@ -6,6 +8,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -22,6 +25,9 @@ func testServer(t *testing.T) (*Server, store.Store) {
 	t.Helper()
 	s, err := sqlite.New(":memory:")
 	if err != nil {
+		if strings.Contains(err.Error(), "sqlite driver not registered") {
+			t.Skip("Skipping test because sqlite driver is not registered (build with -tags sqlite to enable)")
+		}
 		t.Fatalf("failed to create test store: %v", err)
 	}
 

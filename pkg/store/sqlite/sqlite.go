@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/ptone/scion-agent/pkg/store"
-	_ "modernc.org/sqlite" // Pure Go SQLite driver
 )
 
 // SQLiteStore implements the Store interface using SQLite.
@@ -24,6 +23,9 @@ type SQLiteStore struct {
 func New(dbPath string) (*SQLiteStore, error) {
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
+		if strings.Contains(err.Error(), "unknown driver") {
+			return nil, fmt.Errorf("sqlite driver not registered; was the binary built with -tags no_sqlite? %w", err)
+		}
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 

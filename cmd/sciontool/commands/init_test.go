@@ -88,7 +88,7 @@ func TestInitCommand_Integration(t *testing.T) {
 	}
 
 	// Build sciontool if needed for integration testing
-	cmd := exec.Command("go", "build", "-o", "/tmp/sciontool-test", "../")
+	cmd := exec.Command("go", "build", "-buildvcs=false", "-o", "/tmp/sciontool-test", "../")
 	if err := cmd.Run(); err != nil {
 		t.Skipf("failed to build sciontool for integration test: %v", err)
 	}
