@@ -201,6 +201,7 @@ func (s *LocalPTYSession) startDockerExec() error {
 	// Build docker exec command
 	args := []string{
 		"exec", "-i",
+		"--user", "scion",
 		s.containerID,
 		"tmux", "attach-session", "-t", "scion",
 	}
@@ -384,6 +385,7 @@ func (h *StreamPTYHandler) startDockerExec() error {
 
 	args := []string{
 		"exec", "-i",
+		"--user", "scion",
 		h.containerID,
 		"tmux", "attach-session", "-t", "scion",
 	}

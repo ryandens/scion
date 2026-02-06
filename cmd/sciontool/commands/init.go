@@ -155,6 +155,7 @@ func runInit(args []string) int {
 		GracePeriod: gracePeriod,
 		UID:         targetUID,
 		GID:         targetGID,
+		Username:    "scion",
 	}
 	sup := supervisor.New(config)
 

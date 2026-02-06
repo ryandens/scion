@@ -33,9 +33,9 @@ func (r *DockerRuntime) Run(ctx context.Context, config RunConfig) (string, erro
 		return "", err
 	}
 
-	// Docker supports --init, which we want to use if possible.
-	// We insert it after 'run'
-	newArgs := []string{"run", "--init", "-t"}
+	// sciontool already handles PID 1 responsibilities (zombie reaping, signal forwarding),
+	// so we don't use --init to avoid competing init processes.
+	newArgs := []string{"run", "-t"}
 	newArgs = append(newArgs, args[1:]...)
 
 	out, err := runSimpleCommand(ctx, r.Command, newArgs...)
@@ -152,7 +152,7 @@ func (r *DockerRuntime) Attach(ctx context.Context, id string) error {
 	}
 
 	if agent.Labels["scion.tmux"] == "true" {
-		return runInteractiveCommand(r.Command, "exec", "-it", agent.ID, "tmux", "attach", "-t", "scion")
+		return runInteractiveCommand(r.Command, "exec", "-it", "--user", "scion", agent.ID, "tmux", "attach", "-t", "scion")
 	}
 
 	return runInteractiveCommand(r.Command, "attach", agent.ID)
@@ -229,7 +229,7 @@ func (r *DockerRuntime) Sync(ctx context.Context, id string, direction SyncDirec
 }
 
 func (r *DockerRuntime) Exec(ctx context.Context, id string, cmd []string) (string, error) {
-	args := append([]string{"exec", id}, cmd...)
+	args := append([]string{"exec", "--user", "scion", id}, cmd...)
 	return runSimpleCommand(ctx, r.Command, args...)
 }
 

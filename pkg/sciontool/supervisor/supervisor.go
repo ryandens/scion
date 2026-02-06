@@ -30,6 +30,8 @@ type Config struct {
 	UID int
 	// GID is the target GID for the child process (0 = no change)
 	GID int
+	// Username is the target username for the child process (used to set HOME, USER, LOGNAME)
+	Username string
 }
 
 // DefaultConfig returns a Config with sensible defaults.
@@ -89,6 +91,19 @@ func (s *Supervisor) Run(ctx context.Context, args []string) (int, error) {
 			Gid: uint32(s.config.GID),
 		}
 		log.Debug("Child will run as UID=%d, GID=%d", s.config.UID, s.config.GID)
+
+		// syscall.Credential changes UID/GID but does NOT update env vars.
+		// The child inherits root's HOME=/root, USER=root, etc.
+		// Override these so the child sees the correct user environment.
+		if s.config.Username != "" {
+			home := "/home/" + s.config.Username
+			env := os.Environ()
+			env = setEnvVar(env, "HOME", home)
+			env = setEnvVar(env, "USER", s.config.Username)
+			env = setEnvVar(env, "LOGNAME", s.config.Username)
+			s.cmd.Env = env
+			log.Debug("Child env: HOME=%s, USER=%s, LOGNAME=%s", home, s.config.Username, s.config.Username)
+		}
 	}
 
 	if err := s.cmd.Start(); err != nil {
@@ -218,4 +233,16 @@ func (s *Supervisor) ExitCode() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.exitCode
+}
+
+// setEnvVar sets or replaces an environment variable in a list of KEY=VALUE strings.
+func setEnvVar(env []string, key, value string) []string {
+	prefix := key + "="
+	for i, e := range env {
+		if len(e) >= len(prefix) && e[:len(prefix)] == prefix {
+			env[i] = prefix + value
+			return env
+		}
+	}
+	return append(env, prefix+value)
 }
