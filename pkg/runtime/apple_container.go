@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/ptone/scion-agent/pkg/api"
 )
@@ -55,7 +56,23 @@ func (r *AppleContainerRuntime) Delete(ctx context.Context, id string) error {
 	// Apple's `container rm` doesn't support -f and fails on running containers,
 	// so kill first (ignoring errors if already stopped) then remove.
 	_, _ = runSimpleCommand(ctx, r.Command, "kill", id)
-	_, err := runSimpleCommand(ctx, r.Command, "rm", id)
+
+	// Retry rm with short delays since kill is asynchronous and the container
+	// may not be immediately ready for removal.
+	var err error
+	for attempt := 0; attempt < 5; attempt++ {
+		_, err = runSimpleCommand(ctx, r.Command, "rm", id)
+		if err == nil {
+			return nil
+		}
+		// Check if context is cancelled before sleeping
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+			// Continue to next attempt
+		}
+	}
 	return err
 }
 
