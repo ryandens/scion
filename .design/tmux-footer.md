@@ -32,8 +32,10 @@ set -g status-left "[scion] "
 #### Status Right
 Include the new environment variables with subtle color differences for better readability.
 ```tmux
-set -g status-right "#[fg=colour244]#{$SCION_TEMPLATE_NAME} #[fg=colour136]/ #[fg=colour166]#{$SCION_AGENT_NAME} #[fg=colour136](#{$SCION_BROKER_NAME}) #[fg=colour136]%H:%M %d-%b-%y"
+set -g status-right "#[fg=colour244]#(echo $SCION_TEMPLATE_NAME) #[fg=colour136]/ #[fg=colour166]#(echo $SCION_AGENT_NAME) #[fg=colour136](#(echo $SCION_BROKER_NAME)) #[fg=colour136]%H:%M %d-%b-%y"
 ```
+
+**Note**: Environment variables in tmux status bars must be accessed via shell commands using `#(echo $VAR)`. The `#{...}` syntax is for tmux internal format variables, not shell environment variables.
 
 ## Implementation Plan
 
