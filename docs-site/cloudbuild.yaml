@@ -42,7 +42,7 @@ steps:
       - 'managed'
 
 substitutions:
-  _REGISTRY: 'gcr.io.pkg.dev/${PROJECT_ID}/scion-images'
+  _REGISTRY: 'us-central1-docker.pkg.dev/duet01/scion-images' # Overridden by deploy.sh
   _SERVICE_NAME: 'scion-docs'
   _REGION: 'us-central1'
   _GIT_SHA: 'latest'
