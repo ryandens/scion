@@ -139,7 +139,9 @@ func TestClient_ConvenienceMethods(t *testing.T) {
 	t.Run("Heartbeat", func(t *testing.T) {
 		err := client.Heartbeat(ctx)
 		require.NoError(t, err)
-		assert.Equal(t, StatusRunning, lastStatus.Status)
+		// Heartbeat should not set a status (empty string), only the heartbeat flag
+		// This prevents heartbeats from overwriting the actual agent status
+		assert.Equal(t, AgentStatus(""), lastStatus.Status)
 		assert.True(t, lastStatus.Heartbeat)
 	})
 

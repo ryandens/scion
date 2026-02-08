@@ -76,7 +76,7 @@ func listAgentsLocal() error {
 		return err
 	}
 
-	return displayAgents(agents, listAll)
+	return displayAgents(agents, listAll, false)
 }
 
 // listAgentsViaHub lists agents using the Hub API
@@ -113,7 +113,7 @@ func listAgentsViaHub(hubCtx *HubContext) error {
 	// Client-side enrichment: fetch broker/grove names if not provided by Hub
 	enrichAgentsClientSide(ctx, hubCtx.Client, agents)
 
-	return displayAgents(agents, listAll)
+	return displayAgents(agents, listAll, true)
 }
 
 // enrichAgentsClientSide populates Grove and RuntimeBrokerName fields client-side
@@ -208,7 +208,8 @@ func hubAgentToAgentInfo(a hubclient.Agent) api.AgentInfo {
 }
 
 // displayAgents displays agents in the requested format
-func displayAgents(agents []api.AgentInfo, all bool) error {
+// hubMode indicates if the listing is from Hub (shows LAST SEEN column)
+func displayAgents(agents []api.AgentInfo, all bool, hubMode bool) error {
 	if outputFormat == "json" {
 		if agents == nil {
 			agents = []api.AgentInfo{}
@@ -228,7 +229,11 @@ func displayAgents(agents []api.AgentInfo, all bool) error {
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "NAME\tTEMPLATE\tRUNTIME\tGROVE\tBROKER\tAGENT STATUS\tSESSION\tCONTAINER")
+	if hubMode {
+		fmt.Fprintln(w, "NAME\tTEMPLATE\tRUNTIME\tGROVE\tBROKER\tAGENT STATUS\tSESSION\tCONTAINER\tLAST SEEN")
+	} else {
+		fmt.Fprintln(w, "NAME\tTEMPLATE\tRUNTIME\tGROVE\tBROKER\tAGENT STATUS\tSESSION\tCONTAINER")
+	}
 	for _, a := range agents {
 		agentStatus := a.Status
 		if agentStatus == "" {
@@ -247,10 +252,54 @@ func displayAgents(agents []api.AgentInfo, all bool) error {
 		if broker == "" {
 			broker = a.RuntimeBrokerID
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", a.Name, a.Template, a.Runtime, a.Grove, broker, agentStatus, sessionStatus, containerStatus)
+		if hubMode {
+			lastSeen := formatLastSeen(a.LastSeen)
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", a.Name, a.Template, a.Runtime, a.Grove, broker, agentStatus, sessionStatus, containerStatus, lastSeen)
+		} else {
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", a.Name, a.Template, a.Runtime, a.Grove, broker, agentStatus, sessionStatus, containerStatus)
+		}
 	}
 	w.Flush()
 	return nil
+}
+
+// formatLastSeen formats a timestamp as a human-readable relative time
+func formatLastSeen(t time.Time) string {
+	if t.IsZero() {
+		return "-"
+	}
+
+	d := time.Since(t)
+	if d < 0 {
+		return "now"
+	}
+
+	switch {
+	case d < time.Minute:
+		secs := int(d.Seconds())
+		if secs <= 1 {
+			return "just now"
+		}
+		return fmt.Sprintf("%ds ago", secs)
+	case d < time.Hour:
+		mins := int(d.Minutes())
+		if mins == 1 {
+			return "1m ago"
+		}
+		return fmt.Sprintf("%dm ago", mins)
+	case d < 24*time.Hour:
+		hours := int(d.Hours())
+		if hours == 1 {
+			return "1h ago"
+		}
+		return fmt.Sprintf("%dh ago", hours)
+	default:
+		days := int(d.Hours() / 24)
+		if days == 1 {
+			return "1d ago"
+		}
+		return fmt.Sprintf("%dd ago", days)
+	}
 }
 
 // handleUnlinkedGrovePrompt checks if the error is due to an unlinked grove and prompts the user.
