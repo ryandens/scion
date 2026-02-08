@@ -102,7 +102,7 @@ func (r *DockerRuntime) List(ctx context.Context, labelFilter map[string]string)
 
 		if match {
 			agents = append(agents, api.AgentInfo{
-				ID:              d.ID,
+				ContainerID:     d.ID,
 				Name:            d.Names,
 				ContainerStatus: d.Status,
 				Status:          "created", // Default status, updated by AgentManager logic
@@ -133,8 +133,8 @@ func (r *DockerRuntime) Attach(ctx context.Context, id string) error {
 
 	var agent *api.AgentInfo
 	for _, a := range agents {
-		// Match by full ID, short ID (12 chars), or name (with or without leading slash)
-		if a.ID == id || (len(id) >= 12 && strings.HasPrefix(a.ID, id)) || (len(a.ID) >= 12 && strings.HasPrefix(id, a.ID)) ||
+		// Match by full container ID, short ID (12 chars), or name (with or without leading slash)
+		if a.ContainerID == id || (len(id) >= 12 && strings.HasPrefix(a.ContainerID, id)) || (len(a.ContainerID) >= 12 && strings.HasPrefix(id, a.ContainerID)) ||
 			a.Name == id || a.Name == "/"+id || strings.TrimPrefix(a.Name, "/") == id {
 			agent = &a
 			break
@@ -152,10 +152,10 @@ func (r *DockerRuntime) Attach(ctx context.Context, id string) error {
 	}
 
 	if agent.Labels["scion.tmux"] == "true" {
-		return runInteractiveCommand(r.Command, "exec", "-it", "--user", "scion", agent.ID, "tmux", "attach", "-t", "scion")
+		return runInteractiveCommand(r.Command, "exec", "-it", "--user", "scion", agent.ContainerID, "tmux", "attach", "-t", "scion")
 	}
 
-	return runInteractiveCommand(r.Command, "attach", agent.ID)
+	return runInteractiveCommand(r.Command, "attach", agent.ContainerID)
 }
 
 func (r *DockerRuntime) ImageExists(ctx context.Context, image string) (bool, error) {
@@ -175,8 +175,8 @@ func (r *DockerRuntime) Sync(ctx context.Context, id string, direction SyncDirec
 
 	var agent *api.AgentInfo
 	for _, a := range agents {
-		// Match by full ID, short ID (12 chars), or name (with or without leading slash)
-		if a.ID == id || (len(id) >= 12 && strings.HasPrefix(a.ID, id)) || (len(a.ID) >= 12 && strings.HasPrefix(id, a.ID)) ||
+		// Match by full container ID, short ID (12 chars), or name (with or without leading slash)
+		if a.ContainerID == id || (len(id) >= 12 && strings.HasPrefix(a.ContainerID, id)) || (len(a.ContainerID) >= 12 && strings.HasPrefix(id, a.ContainerID)) ||
 			a.Name == id || a.Name == "/"+id || strings.TrimPrefix(a.Name, "/") == id {
 			agent = &a
 			break

@@ -25,8 +25,8 @@ type PTYClientConfig struct {
 	Endpoint string
 	// Token is the Bearer token for authentication.
 	Token string
-	// AgentID is the ID or name of the agent to attach to.
-	AgentID string
+	// Slug is the agent's URL-safe identifier.
+	Slug string
 	// Cols is the initial terminal width.
 	Cols int
 	// Rows is the initial terminal height.
@@ -106,7 +106,7 @@ func (c *PTYClient) buildWebSocketURL() (string, error) {
 	}
 
 	// Build path
-	u.Path = fmt.Sprintf("/api/v1/agents/%s/pty", c.config.AgentID)
+	u.Path = fmt.Sprintf("/api/v1/agents/%s/pty", c.config.Slug)
 
 	// Add query params for terminal size
 	q := u.Query()
@@ -309,7 +309,7 @@ func (c *PTYClient) Close() error {
 }
 
 // AttachToAgent is a convenience function that connects and runs a PTY session.
-func AttachToAgent(ctx context.Context, endpoint, token, agentID string) error {
+func AttachToAgent(ctx context.Context, endpoint, token, slug string) error {
 	// Get terminal size
 	cols, rows := 80, 24
 	if fd := int(os.Stdin.Fd()); term.IsTerminal(fd) {
@@ -322,7 +322,7 @@ func AttachToAgent(ctx context.Context, endpoint, token, agentID string) error {
 	client := NewPTYClient(PTYClientConfig{
 		Endpoint: endpoint,
 		Token:    token,
-		AgentID:  agentID,
+		Slug:     slug,
 		Cols:     cols,
 		Rows:     rows,
 	})
@@ -336,7 +336,7 @@ func AttachToAgent(ctx context.Context, endpoint, token, agentID string) error {
 }
 
 // BuildDirectAttachURL builds a URL for direct attachment to a runtime broker.
-func BuildDirectAttachURL(hostEndpoint, agentID string, cols, rows int) (string, error) {
+func BuildDirectAttachURL(hostEndpoint, slug string, cols, rows int) (string, error) {
 	u, err := url.Parse(hostEndpoint)
 	if err != nil {
 		return "", err
@@ -350,7 +350,7 @@ func BuildDirectAttachURL(hostEndpoint, agentID string, cols, rows int) (string,
 		u.Scheme = "ws"
 	}
 
-	u.Path = fmt.Sprintf("/api/v1/agents/%s/attach", agentID)
+	u.Path = fmt.Sprintf("/api/v1/agents/%s/attach", slug)
 
 	q := u.Query()
 	q.Set("cols", fmt.Sprintf("%d", cols))

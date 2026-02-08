@@ -83,10 +83,11 @@ type AuthProvider interface {
 // It supports both local/solo mode and hosted/distributed mode.
 type AgentInfo struct {
 	// Identity fields
-	ID       string `json:"id,omitempty"`       // Container/runtime ID (legacy, runtime-assigned)
-	AgentID  string `json:"agentId,omitempty"`  // URL-safe slug identifier for the agent
-	Name     string `json:"name"`               // Human-friendly display name
-	Template string `json:"template"`
+	ID          string `json:"id,omitempty"`          // Hub UUID (database primary key, globally unique)
+	Slug        string `json:"slug,omitempty"`        // URL-safe slug identifier (unique per grove)
+	ContainerID string `json:"containerId,omitempty"` // Runtime container ID (ephemeral, runtime-assigned)
+	Name        string `json:"name"`                  // Human-friendly display name
+	Template    string `json:"template"`
 
 	// Grove association
 	Grove     string `json:"grove"`               // Grove name (legacy, simple string)

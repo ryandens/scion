@@ -92,13 +92,13 @@ func TestAgentsList(t *testing.T) {
 			"agents": []Agent{
 				{
 					ID:      "uuid-1",
-					AgentID: "agent-1",
+					Slug: "agent-1",
 					Name:    "Test Agent 1",
 					Status:  "running",
 				},
 				{
 					ID:      "uuid-2",
-					AgentID: "agent-2",
+					Slug: "agent-2",
 					Name:    "Test Agent 2",
 					Status:  "stopped",
 				},
@@ -132,7 +132,7 @@ func TestAgentsGet(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(Agent{
 			ID:      "uuid-123",
-			AgentID: "test-agent",
+			Slug: "test-agent",
 			Name:    "Test Agent",
 			Status:  "running",
 			Created: time.Now(),
@@ -145,8 +145,8 @@ func TestAgentsGet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if agent.AgentID != "test-agent" {
-		t.Errorf("expected agentId 'test-agent', got %q", agent.AgentID)
+	if agent.Slug != "test-agent" {
+		t.Errorf("expected agentId 'test-agent', got %q", agent.Slug)
 	}
 	if agent.Name != "Test Agent" {
 		t.Errorf("expected name 'Test Agent', got %q", agent.Name)
@@ -175,7 +175,7 @@ func TestAgentsCreate(t *testing.T) {
 		json.NewEncoder(w).Encode(CreateAgentResponse{
 			Agent: &Agent{
 				ID:      "uuid-new",
-				AgentID: "new-agent",
+				Slug: "new-agent",
 				Name:    "new-agent",
 				GroveID: "grove-123",
 				Status:  "provisioning",
@@ -192,8 +192,8 @@ func TestAgentsCreate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if resp.Agent.AgentID != "new-agent" {
-		t.Errorf("expected agentId 'new-agent', got %q", resp.Agent.AgentID)
+	if resp.Agent.Slug != "new-agent" {
+		t.Errorf("expected agentId 'new-agent', got %q", resp.Agent.Slug)
 	}
 }
 

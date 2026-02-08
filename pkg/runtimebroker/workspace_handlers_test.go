@@ -72,13 +72,13 @@ func TestWorkspaceUploadValidation(t *testing.T) {
 		},
 		{
 			name:       "missing storagePath",
-			body:       WorkspaceUploadRequest{AgentID: "test-agent"},
+			body:       WorkspaceUploadRequest{Slug: "test-agent"},
 			wantStatus: http.StatusBadRequest,
 			wantCode:   ErrCodeValidationError,
 		},
 		{
 			name:       "missing bucket when not configured",
-			body:       WorkspaceUploadRequest{AgentID: "test-agent", StoragePath: "workspaces/g/a"},
+			body:       WorkspaceUploadRequest{Slug: "test-agent", StoragePath: "workspaces/g/a"},
 			wantStatus: http.StatusBadRequest,
 			wantCode:   ErrCodeValidationError,
 		},
@@ -129,13 +129,13 @@ func TestWorkspaceApplyValidation(t *testing.T) {
 		},
 		{
 			name:       "missing storagePath",
-			body:       WorkspaceApplyRequest{AgentID: "test-agent"},
+			body:       WorkspaceApplyRequest{Slug: "test-agent"},
 			wantStatus: http.StatusBadRequest,
 			wantCode:   ErrCodeValidationError,
 		},
 		{
 			name:       "missing bucket when not configured",
-			body:       WorkspaceApplyRequest{AgentID: "test-agent", StoragePath: "workspaces/g/a"},
+			body:       WorkspaceApplyRequest{Slug: "test-agent", StoragePath: "workspaces/g/a"},
 			wantStatus: http.StatusBadRequest,
 			wantCode:   ErrCodeValidationError,
 		},
@@ -214,7 +214,7 @@ func TestWorkspaceUploadAgentNotFound(t *testing.T) {
 	srv := New(cfg, mgr, rt)
 
 	body := WorkspaceUploadRequest{
-		AgentID:     "nonexistent-agent",
+		Slug:     "nonexistent-agent",
 		StoragePath: "workspaces/grove/agent",
 	}
 	bodyBytes, _ := json.Marshal(body)
@@ -238,7 +238,7 @@ func TestWorkspaceApplyAgentNotFound(t *testing.T) {
 	srv := New(cfg, mgr, rt)
 
 	body := WorkspaceApplyRequest{
-		AgentID:     "nonexistent-agent",
+		Slug:     "nonexistent-agent",
 		StoragePath: "workspaces/grove/agent",
 	}
 	bodyBytes, _ := json.Marshal(body)
@@ -568,7 +568,7 @@ func TestApplyFilePermissions_MissingFile(t *testing.T) {
 
 func TestWorkspaceUploadRequest_JSONSerialization(t *testing.T) {
 	req := WorkspaceUploadRequest{
-		AgentID:         "agent-123",
+		Slug:         "agent-123",
 		StoragePath:     "workspaces/grove-1/agent-123",
 		Bucket:          "my-bucket",
 		ExcludePatterns: []string{".git/**", "node_modules/**"},
@@ -584,8 +584,8 @@ func TestWorkspaceUploadRequest_JSONSerialization(t *testing.T) {
 		t.Fatalf("failed to unmarshal: %v", err)
 	}
 
-	if parsed.AgentID != "agent-123" {
-		t.Errorf("agent ID = %q, want %q", parsed.AgentID, "agent-123")
+	if parsed.Slug != "agent-123" {
+		t.Errorf("agent ID = %q, want %q", parsed.Slug, "agent-123")
 	}
 	if parsed.StoragePath != "workspaces/grove-1/agent-123" {
 		t.Errorf("storage path = %q, want %q", parsed.StoragePath, "workspaces/grove-1/agent-123")
@@ -637,7 +637,7 @@ func TestWorkspaceUploadResponse_JSONSerialization(t *testing.T) {
 
 func TestWorkspaceApplyRequest_JSONSerialization(t *testing.T) {
 	req := WorkspaceApplyRequest{
-		AgentID:     "agent-456",
+		Slug:     "agent-456",
 		StoragePath: "workspaces/grove-2/agent-456",
 		Bucket:      "other-bucket",
 		Manifest: &transfer.Manifest{
@@ -658,8 +658,8 @@ func TestWorkspaceApplyRequest_JSONSerialization(t *testing.T) {
 		t.Fatalf("failed to unmarshal: %v", err)
 	}
 
-	if parsed.AgentID != "agent-456" {
-		t.Errorf("agent ID = %q, want %q", parsed.AgentID, "agent-456")
+	if parsed.Slug != "agent-456" {
+		t.Errorf("agent ID = %q, want %q", parsed.Slug, "agent-456")
 	}
 	if parsed.Manifest == nil {
 		t.Fatal("manifest should not be nil")
@@ -743,7 +743,7 @@ func TestWorkspaceUpload_WithBucketInRequest(t *testing.T) {
 
 	// Bucket provided in request
 	body := WorkspaceUploadRequest{
-		AgentID:     "test-agent",
+		Slug:     "test-agent",
 		StoragePath: "workspaces/grove/agent",
 		Bucket:      "request-bucket",
 	}
@@ -776,7 +776,7 @@ func TestWorkspaceApply_WithBucketInRequest(t *testing.T) {
 
 	// Bucket provided in request
 	body := WorkspaceApplyRequest{
-		AgentID:     "test-agent",
+		Slug:     "test-agent",
 		StoragePath: "workspaces/grove/agent",
 		Bucket:      "request-bucket",
 	}

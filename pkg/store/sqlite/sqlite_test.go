@@ -48,7 +48,7 @@ func TestAgentCRUD(t *testing.T) {
 	// Create agent
 	agent := &store.Agent{
 		ID:         api.NewUUID(),
-		AgentID:    "test-agent",
+		Slug:       "test-agent",
 		Name:       "Test Agent",
 		Template:   "claude",
 		GroveID:    grove.ID,
@@ -66,7 +66,7 @@ func TestAgentCRUD(t *testing.T) {
 	retrieved, err := s.GetAgent(ctx, agent.ID)
 	require.NoError(t, err)
 	assert.Equal(t, agent.ID, retrieved.ID)
-	assert.Equal(t, agent.AgentID, retrieved.AgentID)
+	assert.Equal(t, agent.Slug, retrieved.Slug)
 	assert.Equal(t, agent.Name, retrieved.Name)
 	assert.Equal(t, agent.Template, retrieved.Template)
 	assert.Equal(t, "test", retrieved.Labels["env"])
@@ -124,7 +124,7 @@ func TestAgentList(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		agent := &store.Agent{
 			ID:         api.NewUUID(),
-			AgentID:    api.Slugify("agent-" + string(rune('a'+i))),
+			Slug:    api.Slugify("agent-" + string(rune('a'+i))),
 			Name:       "Agent " + string(rune('A'+i)),
 			Template:   "claude",
 			GroveID:    grove.ID,
@@ -174,7 +174,7 @@ func TestAgentStatusUpdate(t *testing.T) {
 
 	agent := &store.Agent{
 		ID:         api.NewUUID(),
-		AgentID:    "test-agent",
+		Slug:    "test-agent",
 		Name:       "Test Agent",
 		Template:   "claude",
 		GroveID:    grove.ID,
@@ -878,7 +878,7 @@ func TestCascadeDelete(t *testing.T) {
 
 	agent := &store.Agent{
 		ID:         api.NewUUID(),
-		AgentID:    "test-agent",
+		Slug:    "test-agent",
 		Name:       "Test Agent",
 		Template:   "claude",
 		GroveID:    grove.ID,

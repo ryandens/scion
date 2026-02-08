@@ -196,7 +196,7 @@ func TestWorkspaceGetStatus(t *testing.T) {
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(WorkspaceStatusResponse{
-			AgentID:    "agent-status",
+			Slug:    "agent-status",
 			GroveID:    "grove-xyz",
 			StorageURI: "gs://bucket/workspaces/grove-xyz/agent-status/",
 			LastSync: &WorkspaceSyncInfo{
@@ -215,8 +215,8 @@ func TestWorkspaceGetStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if resp.AgentID != "agent-status" {
-		t.Errorf("expected agent ID 'agent-status', got %q", resp.AgentID)
+	if resp.Slug != "agent-status" {
+		t.Errorf("expected agent ID 'agent-status', got %q", resp.Slug)
 	}
 	if resp.GroveID != "grove-xyz" {
 		t.Errorf("expected grove ID 'grove-xyz', got %q", resp.GroveID)
@@ -494,7 +494,7 @@ func TestWorkspaceGetStatus_NoLastSync(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(WorkspaceStatusResponse{
-			AgentID:    "agent-new",
+			Slug:    "agent-new",
 			GroveID:    "grove-1",
 			StorageURI: "gs://bucket/workspaces/grove-1/agent-new/",
 			LastSync:   nil, // No sync yet
@@ -510,8 +510,8 @@ func TestWorkspaceGetStatus_NoLastSync(t *testing.T) {
 	if resp.LastSync != nil {
 		t.Error("expected nil LastSync for new agent")
 	}
-	if resp.AgentID != "agent-new" {
-		t.Errorf("agent ID = %q, want %q", resp.AgentID, "agent-new")
+	if resp.Slug != "agent-new" {
+		t.Errorf("agent ID = %q, want %q", resp.Slug, "agent-new")
 	}
 }
 

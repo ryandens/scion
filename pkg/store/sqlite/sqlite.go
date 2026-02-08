@@ -506,7 +506,7 @@ func (s *SQLiteStore) CreateAgent(ctx context.Context, agent *store.Agent) error
 			created_by, owner_id, visibility, state_version
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
-		agent.ID, agent.AgentID, agent.Name, agent.Template, agent.GroveID,
+		agent.ID, agent.Slug, agent.Name, agent.Template, agent.GroveID,
 		marshalJSON(agent.Labels), marshalJSON(agent.Annotations),
 		agent.Status, agent.ConnectionState, agent.ContainerStatus, agent.SessionStatus, agent.RuntimeState,
 		agent.Image, agent.Detached, agent.Runtime, nullableString(agent.RuntimeBrokerID), agent.WebPTYEnabled, agent.TaskSummary, agent.Message,
@@ -539,7 +539,7 @@ func (s *SQLiteStore) GetAgent(ctx context.Context, id string) (*store.Agent, er
 			created_by, owner_id, visibility, state_version
 		FROM agents WHERE id = ?
 	`, id).Scan(
-		&agent.ID, &agent.AgentID, &agent.Name, &agent.Template, &agent.GroveID,
+		&agent.ID, &agent.Slug, &agent.Name, &agent.Template, &agent.GroveID,
 		&labels, &annotations,
 		&agent.Status, &agent.ConnectionState, &agent.ContainerStatus, &agent.SessionStatus, &agent.RuntimeState,
 		&agent.Image, &agent.Detached, &agent.Runtime, &runtimeBrokerID, &agent.WebPTYEnabled, &agent.TaskSummary, &message,
@@ -586,7 +586,7 @@ func (s *SQLiteStore) GetAgentBySlug(ctx context.Context, groveID, slug string) 
 			created_by, owner_id, visibility, state_version
 		FROM agents WHERE grove_id = ? AND agent_id = ?
 	`, groveID, slug).Scan(
-		&agent.ID, &agent.AgentID, &agent.Name, &agent.Template, &agent.GroveID,
+		&agent.ID, &agent.Slug, &agent.Name, &agent.Template, &agent.GroveID,
 		&labels, &annotations,
 		&agent.Status, &agent.ConnectionState, &agent.ContainerStatus, &agent.SessionStatus, &agent.RuntimeState,
 		&agent.Image, &agent.Detached, &agent.Runtime, &runtimeBrokerID, &agent.WebPTYEnabled, &agent.TaskSummary, &message,
@@ -632,7 +632,7 @@ func (s *SQLiteStore) UpdateAgent(ctx context.Context, agent *store.Agent) error
 			owner_id = ?, visibility = ?, state_version = ?
 		WHERE id = ? AND state_version = ?
 	`,
-		agent.AgentID, agent.Name, agent.Template,
+		agent.Slug, agent.Name, agent.Template,
 		marshalJSON(agent.Labels), marshalJSON(agent.Annotations),
 		agent.Status, agent.ConnectionState, agent.ContainerStatus, agent.SessionStatus, agent.RuntimeState,
 		agent.Image, agent.Detached, agent.Runtime, nullableString(agent.RuntimeBrokerID), agent.WebPTYEnabled, agent.TaskSummary, agent.Message,
@@ -746,7 +746,7 @@ func (s *SQLiteStore) ListAgents(ctx context.Context, filter store.AgentFilter, 
 		var runtimeBrokerID, message sql.NullString
 
 		if err := rows.Scan(
-			&agent.ID, &agent.AgentID, &agent.Name, &agent.Template, &agent.GroveID,
+			&agent.ID, &agent.Slug, &agent.Name, &agent.Template, &agent.GroveID,
 			&labels, &annotations,
 			&agent.Status, &agent.ConnectionState, &agent.ContainerStatus, &agent.SessionStatus, &agent.RuntimeState,
 			&agent.Image, &agent.Detached, &agent.Runtime, &runtimeBrokerID, &agent.WebPTYEnabled, &agent.TaskSummary, &message,

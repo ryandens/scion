@@ -352,7 +352,7 @@ func resolveAgentID(ctx context.Context, client hubclient.Client, groveID, agent
 			if agent.Status != "running" {
 				return "", fmt.Errorf("agent '%s' is not running (status: %s)", agentName, agent.Status)
 			}
-			return agent.AgentID, nil
+			return agent.Slug, nil
 		}
 	}
 

@@ -19,7 +19,7 @@ func (m *AgentManager) Start(ctx context.Context, opts api.StartOptions) (*api.A
 	agents, err := m.Runtime.List(ctx, nil)
 	if err == nil {
 		for _, a := range agents {
-			if a.ID == opts.Name || a.Name == opts.Name || strings.TrimPrefix(a.Name, "/") == opts.Name {
+			if a.ContainerID == opts.Name || a.Name == opts.Name || strings.TrimPrefix(a.Name, "/") == opts.Name {
 				status := strings.ToLower(a.ContainerStatus)
 				isRunning := strings.HasPrefix(status, "up") || status == "running"
 				if isRunning {
@@ -34,7 +34,7 @@ func (m *AgentManager) Start(ctx context.Context, opts api.StartOptions) (*api.A
 					}
 				}
 				// If it exists but not running (or we have a new task), we delete it so we can recreate it
-				if err := m.Runtime.Delete(ctx, a.ID); err != nil {
+				if err := m.Runtime.Delete(ctx, a.ContainerID); err != nil {
 					return nil, fmt.Errorf("failed to cleanup existing container: %w", err)
 				}
 			}
@@ -291,7 +291,7 @@ func (m *AgentManager) Start(ctx context.Context, opts api.StartOptions) (*api.A
 	allAgents, err := m.Runtime.List(ctx, map[string]string{"scion.name": opts.Name})
 	if err == nil {
 		for _, a := range allAgents {
-			if a.ID == id || a.Name == opts.Name {
+			if a.ContainerID == id || a.Name == opts.Name {
 				a.Detached = detached
 				a.Warnings = warnings
 				return &a, nil

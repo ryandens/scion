@@ -151,7 +151,8 @@ type RuntimeBrokerClient interface {
 // RemoteCreateAgentRequest is the request body for creating an agent on a remote runtime broker.
 type RemoteCreateAgentRequest struct {
 	RequestID   string             `json:"requestId,omitempty"`
-	AgentID     string             `json:"agentId"`
+	ID          string             `json:"id,omitempty"` // Hub UUID for status reporting
+	Slug        string             `json:"slug"`         // URL-safe identifier for the agent
 	Name        string             `json:"name"`
 	GroveID     string             `json:"groveId"`
 	UserID      string             `json:"userId,omitempty"`
@@ -192,8 +193,9 @@ type RemoteAgentResponse struct {
 
 // RemoteAgentInfo contains agent information from a remote runtime broker.
 type RemoteAgentInfo struct {
-	ID              string `json:"id"`
-	AgentID         string `json:"agentId"`
+	ID              string `json:"id"`              // Hub UUID
+	Slug            string `json:"slug"`            // URL-safe identifier
+	ContainerID     string `json:"containerId"`     // Runtime container ID
 	Name            string `json:"name"`
 	Template        string `json:"template,omitempty"`
 	Runtime         string `json:"runtime,omitempty"`

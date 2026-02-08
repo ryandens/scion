@@ -71,8 +71,9 @@ const (
 
 // AgentResponse represents an agent in API responses.
 type AgentResponse struct {
-	ID              string            `json:"id,omitempty"`
-	AgentID         string            `json:"agentId"`
+	ID              string            `json:"id,omitempty"`          // Hub UUID
+	Slug            string            `json:"slug"`                  // URL-safe identifier
+	ContainerID     string            `json:"containerId,omitempty"` // Runtime container ID
 	Name            string            `json:"name"`
 	Template        string            `json:"template,omitempty"`  // Template name used
 	RuntimeType     string            `json:"runtime,omitempty"`   // Runtime type (docker, kubernetes, apple)
@@ -122,7 +123,8 @@ type ListAgentsResponse struct {
 // CreateAgentRequest is the request body for creating an agent.
 type CreateAgentRequest struct {
 	RequestID   string             `json:"requestId,omitempty"`
-	AgentID     string             `json:"agentId,omitempty"`
+	ID          string             `json:"id,omitempty"`   // Hub UUID for status reporting
+	Slug        string             `json:"slug,omitempty"` // URL-safe identifier
 	Name        string             `json:"name"`
 	GroveID     string             `json:"groveId,omitempty"`
 	UserID      string             `json:"userId,omitempty"`
@@ -231,7 +233,8 @@ func AgentInfoToResponse(info api.AgentInfo) AgentResponse {
 
 	resp := AgentResponse{
 		ID:              info.ID,
-		AgentID:         info.AgentID,
+		Slug:            info.Slug,
+		ContainerID:     info.ContainerID,
 		Name:            info.Name,
 		Template:        info.Template,
 		RuntimeType:     info.Runtime,
@@ -250,9 +253,9 @@ func AgentInfoToResponse(info api.AgentInfo) AgentResponse {
 		}
 	}
 
-	if info.ID != "" {
+	if info.ContainerID != "" {
 		resp.Runtime = &AgentRuntime{
-			ContainerID: info.ID,
+			ContainerID: info.ContainerID,
 		}
 	}
 

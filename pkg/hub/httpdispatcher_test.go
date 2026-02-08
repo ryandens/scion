@@ -52,8 +52,9 @@ func (m *mockRuntimeBrokerClient) CreateAgent(ctx context.Context, brokerID, bro
 	}
 	return &RemoteAgentResponse{
 		Agent: &RemoteAgentInfo{
-			ID:              "container-123",
-			AgentID:         req.AgentID,
+			ID:              req.ID,
+			ContainerID:     "container-123",
+			Slug:            req.Slug,
 			Name:            req.Name,
 			Status:          "running",
 			ContainerStatus: "Up 5 seconds",
@@ -280,8 +281,9 @@ func TestHTTPRuntimeBrokerClient_CreateAgent(t *testing.T) {
 
 		resp := RemoteAgentResponse{
 			Agent: &RemoteAgentInfo{
-				ID:              "container-123",
-				AgentID:         req.AgentID,
+				ID:              req.ID,
+				ContainerID:     "container-123",
+				Slug:            req.Slug,
 				Name:            req.Name,
 				Status:          "running",
 				ContainerStatus: "Up 5 seconds",
@@ -298,7 +300,8 @@ func TestHTTPRuntimeBrokerClient_CreateAgent(t *testing.T) {
 	client := NewHTTPRuntimeBrokerClient()
 
 	req := &RemoteCreateAgentRequest{
-		AgentID: "agent-1",
+		ID:      "hub-uuid-1",
+		Slug:    "agent-1",
 		Name:    "test-agent",
 		GroveID: "grove-1",
 	}
@@ -311,8 +314,8 @@ func TestHTTPRuntimeBrokerClient_CreateAgent(t *testing.T) {
 	if !resp.Created {
 		t.Error("expected Created to be true")
 	}
-	if resp.Agent.ID != "container-123" {
-		t.Errorf("expected container ID 'container-123', got '%s'", resp.Agent.ID)
+	if resp.Agent.ContainerID != "container-123" {
+		t.Errorf("expected container ID 'container-123', got '%s'", resp.Agent.ContainerID)
 	}
 }
 

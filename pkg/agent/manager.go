@@ -59,9 +59,9 @@ func (m *AgentManager) Delete(ctx context.Context, agentID string, deleteFiles b
 	var targetID string
 	if err == nil {
 		for _, a := range agents {
-			if a.Name == agentID || a.ID == agentID || strings.TrimPrefix(a.Name, "/") == agentID {
+			if a.Name == agentID || a.ContainerID == agentID || strings.TrimPrefix(a.Name, "/") == agentID {
 				containerExists = true
-				targetID = a.ID
+				targetID = a.ContainerID
 				break
 			}
 		}
@@ -97,7 +97,7 @@ func (m *AgentManager) Message(ctx context.Context, agentID string, message stri
 
 	var agent *api.AgentInfo
 	for _, a := range agents {
-		if a.Name == agentID || a.ID == agentID || strings.TrimPrefix(a.Name, "/") == agentID {
+		if a.Name == agentID || a.ContainerID == agentID || strings.TrimPrefix(a.Name, "/") == agentID {
 			agent = &a
 			break
 		}
@@ -138,7 +138,7 @@ func (m *AgentManager) Message(ctx context.Context, agentID string, message stri
 
 	// 4. Execute
 	for _, cmd := range cmds {
-		_, err := m.Runtime.Exec(ctx, agent.ID, cmd)
+		_, err := m.Runtime.Exec(ctx, agent.ContainerID, cmd)
 		if err != nil {
 			return fmt.Errorf("failed to send message to agent '%s': %w", agent.Name, err)
 		}

@@ -304,7 +304,7 @@ func TestCreateAgentWithHubCredentials(t *testing.T) {
 
 	body := `{
 		"name": "test-agent",
-		"agentId": "agent-uuid-123",
+		"id": "agent-uuid-123",
 		"hubEndpoint": "https://hub.example.com",
 		"agentToken": "secret-token-xyz",
 		"config": {"template": "claude"}
@@ -442,6 +442,6 @@ func TestCreateAgentWithoutHubCredentials(t *testing.T) {
 	}
 
 	if _, exists := mgr.lastEnv["SCION_AGENT_ID"]; exists {
-		t.Error("expected SCION_AGENT_ID to not be set when no agentId provided")
+		t.Error("expected SCION_AGENT_ID to not be set when no id provided")
 	}
 }

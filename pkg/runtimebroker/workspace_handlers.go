@@ -22,10 +22,10 @@ import (
 
 // WorkspaceUploadRequest is the request body for uploading workspace to GCS.
 type WorkspaceUploadRequest struct {
-	// AgentID is the identifier of the agent whose workspace to upload.
-	AgentID string `json:"agentId"`
+	// Slug is the identifier of the agent whose workspace to upload.
+	Slug string `json:"slug"`
 	// StoragePath is the path within the bucket where files should be uploaded.
-	// Format: "workspaces/{groveId}/{agentId}"
+	// Format: "workspaces/{groveId}/{slug}"
 	StoragePath string `json:"storagePath"`
 	// Bucket is the GCS bucket name for storage.
 	Bucket string `json:"bucket,omitempty"`
@@ -45,10 +45,10 @@ type WorkspaceUploadResponse struct {
 
 // WorkspaceApplyRequest is the request body for applying workspace from GCS.
 type WorkspaceApplyRequest struct {
-	// AgentID is the identifier of the agent whose workspace to update.
-	AgentID string `json:"agentId"`
+	// Slug is the identifier of the agent whose workspace to update.
+	Slug string `json:"slug"`
 	// StoragePath is the path within the bucket where files are stored.
-	// Format: "workspaces/{groveId}/{agentId}"
+	// Format: "workspaces/{groveId}/{slug}"
 	StoragePath string `json:"storagePath"`
 	// Bucket is the GCS bucket name for storage.
 	Bucket string `json:"bucket,omitempty"`
@@ -87,8 +87,8 @@ func (s *Server) handleWorkspaceUpload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate required fields
-	if req.AgentID == "" {
-		ValidationError(w, "agentId is required", nil)
+	if req.Slug == "" {
+		ValidationError(w, "slug is required", nil)
 		return
 	}
 	if req.StoragePath == "" {
@@ -108,14 +108,14 @@ func (s *Server) handleWorkspaceUpload(w http.ResponseWriter, r *http.Request) {
 
 	if s.config.Debug {
 		slog.Debug("Workspace upload requested",
-			"agentID", req.AgentID,
+			"slug", req.Slug,
 			"bucket", bucket,
 			"storagePath", req.StoragePath,
 		)
 	}
 
 	// Get the container's workspace path
-	workspacePath, err := s.getAgentWorkspacePath(ctx, req.AgentID)
+	workspacePath, err := s.getAgentWorkspacePath(ctx, req.Slug)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			NotFound(w, "Agent")
@@ -184,8 +184,8 @@ func (s *Server) handleWorkspaceApply(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate required fields
-	if req.AgentID == "" {
-		ValidationError(w, "agentId is required", nil)
+	if req.Slug == "" {
+		ValidationError(w, "slug is required", nil)
 		return
 	}
 	if req.StoragePath == "" {
@@ -205,14 +205,14 @@ func (s *Server) handleWorkspaceApply(w http.ResponseWriter, r *http.Request) {
 
 	if s.config.Debug {
 		slog.Debug("Workspace apply requested",
-			"agentID", req.AgentID,
+			"slug", req.Slug,
 			"bucket", bucket,
 			"storagePath", req.StoragePath,
 		)
 	}
 
 	// Get the container's workspace path
-	workspacePath, err := s.getAgentWorkspacePath(ctx, req.AgentID)
+	workspacePath, err := s.getAgentWorkspacePath(ctx, req.Slug)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			NotFound(w, "Agent")
@@ -281,8 +281,8 @@ func (s *Server) getAgentWorkspacePath(ctx context.Context, agentID string) (str
 	var agentName string
 
 	for _, agent := range agents {
-		if agent.Name == agentID || agent.ID == agentID || agent.AgentID == agentID {
-			containerID = agent.ID
+		if agent.Name == agentID || agent.ContainerID == agentID || agent.Slug == agentID {
+			containerID = agent.ContainerID
 			grovePath = agent.GrovePath
 			agentName = agent.Name
 			break

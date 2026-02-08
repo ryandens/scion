@@ -327,7 +327,8 @@ func (d *HTTPAgentDispatcher) DispatchAgentCreate(ctx context.Context, agent *st
 
 	// Build the remote create request
 	req := &RemoteCreateAgentRequest{
-		AgentID:     agent.ID,
+		ID:          agent.ID,
+		Slug:        agent.Slug,
 		Name:        agent.Name,
 		GroveID:     agent.GroveID,
 		UserID:      agent.OwnerID,

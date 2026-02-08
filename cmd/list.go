@@ -170,7 +170,8 @@ func enrichAgentsClientSide(ctx context.Context, client hubclient.Client, agents
 func hubAgentToAgentInfo(a hubclient.Agent) api.AgentInfo {
 	info := api.AgentInfo{
 		ID:                a.ID,
-		AgentID:           a.AgentID,
+		Slug:              a.Slug,
+		ContainerID:       a.ContainerID,
 		Name:              a.Name,
 		Template:          a.Template,
 		Grove:             a.Grove,

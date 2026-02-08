@@ -67,8 +67,8 @@ type SyncToFinalizeResponse struct {
 
 // WorkspaceStatusResponse is the response for getting workspace sync status.
 type WorkspaceStatusResponse struct {
-	// AgentID is the agent ID.
-	AgentID string `json:"agentId"`
+	// Slug is the agent's URL-safe identifier.
+	Slug string `json:"slug"`
 	// GroveID is the grove ID.
 	GroveID string `json:"groveId"`
 	// StorageURI is the GCS URI for the workspace storage.
@@ -150,7 +150,7 @@ func (s *Server) handleWorkspaceStatus(w http.ResponseWriter, r *http.Request, a
 	// TODO: Fetch last sync info from storage metadata
 	// For now, return basic status
 	writeJSON(w, http.StatusOK, WorkspaceStatusResponse{
-		AgentID:    agentID,
+		Slug:       agentID, // agentID parameter is the URL slug
 		GroveID:    agent.GroveID,
 		StorageURI: storageURI,
 		LastSync:   nil, // Will be populated in Phase 4
@@ -208,7 +208,7 @@ func (s *Server) handleWorkspaceSyncFrom(w http.ResponseWriter, r *http.Request,
 
 	// Build request for Runtime Broker
 	uploadReq := RuntimeBrokerWorkspaceUploadRequest{
-		AgentID:         agentID,
+		Slug:            agentID, // agentID parameter is the URL slug
 		StoragePath:     storagePath,
 		ExcludePatterns: req.ExcludePatterns,
 	}
@@ -413,7 +413,7 @@ func (s *Server) handleWorkspaceSyncToFinalize(w http.ResponseWriter, r *http.Re
 	}
 
 	applyReq := RuntimeBrokerWorkspaceApplyRequest{
-		AgentID:     agentID,
+		Slug:        agentID, // agentID parameter is the URL slug
 		StoragePath: storagePath,
 		Manifest:    req.Manifest,
 	}
@@ -446,7 +446,7 @@ func (s *Server) handleWorkspaceSyncToFinalize(w http.ResponseWriter, r *http.Re
 
 // RuntimeBrokerWorkspaceUploadRequest is sent to Runtime Broker to upload workspace to GCS.
 type RuntimeBrokerWorkspaceUploadRequest struct {
-	AgentID         string   `json:"agentId"`
+	Slug            string   `json:"slug"`
 	StoragePath     string   `json:"storagePath"`
 	ExcludePatterns []string `json:"excludePatterns,omitempty"`
 }
@@ -460,7 +460,7 @@ type RuntimeBrokerWorkspaceUploadResponse struct {
 
 // RuntimeBrokerWorkspaceApplyRequest is sent to Runtime Broker to apply workspace from GCS.
 type RuntimeBrokerWorkspaceApplyRequest struct {
-	AgentID     string             `json:"agentId"`
+	Slug        string             `json:"slug"`
 	StoragePath string             `json:"storagePath"`
 	Manifest    *transfer.Manifest `json:"manifest"`
 }

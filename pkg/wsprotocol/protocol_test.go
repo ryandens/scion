@@ -129,7 +129,7 @@ func TestStreamOpenMessage(t *testing.T) {
 	assert.Equal(t, TypeStreamOpen, msg.Type)
 	assert.Equal(t, "stream-1", msg.StreamID)
 	assert.Equal(t, StreamTypePTY, msg.StreamType)
-	assert.Equal(t, "agent-123", msg.AgentID)
+	assert.Equal(t, "agent-123", msg.Slug)
 	assert.Equal(t, 120, msg.Cols)
 	assert.Equal(t, 40, msg.Rows)
 }

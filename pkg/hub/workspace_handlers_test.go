@@ -114,7 +114,7 @@ func TestWorkspaceStatusHandler(t *testing.T) {
 	// Create a test agent
 	agent := &store.Agent{
 		ID:           "agent_workspace_test_1",
-		AgentID:      "workspace-test-agent",
+		Slug:      "workspace-test-agent",
 		Name:         "test-agent",
 		GroveID:      "grove_test_1",
 		Status:       store.AgentStatusRunning,
@@ -142,8 +142,8 @@ func TestWorkspaceStatusHandler(t *testing.T) {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 
-	if resp.AgentID != "agent_workspace_test_1" {
-		t.Errorf("response AgentID = %q, want %q", resp.AgentID, "agent_workspace_test_1")
+	if resp.Slug != "agent_workspace_test_1" {
+		t.Errorf("response AgentID = %q, want %q", resp.Slug, "agent_workspace_test_1")
 	}
 	if resp.GroveID != "grove_test_1" {
 		t.Errorf("response GroveID = %q, want %q", resp.GroveID, "grove_test_1")
@@ -175,7 +175,7 @@ func TestWorkspaceSyncFromHandler_AgentNotRunning(t *testing.T) {
 	// Create a stopped agent
 	agent := &store.Agent{
 		ID:           "agent_stopped_1",
-		AgentID:      "stopped-agent",
+		Slug:      "stopped-agent",
 		Name:         "stopped-agent",
 		GroveID:      "grove_test",
 		Status:       store.AgentStatusStopped,
@@ -209,7 +209,7 @@ func TestWorkspaceSyncToHandler_EmptyFiles(t *testing.T) {
 
 	agent := &store.Agent{
 		ID:           "agent_syncto_test",
-		AgentID:      "sync-to-test-agent",
+		Slug:      "sync-to-test-agent",
 		Name:         "test-agent",
 		GroveID:      "grove_syncto",
 		Status:       store.AgentStatusRunning,
@@ -246,7 +246,7 @@ func TestWorkspaceSyncToFinalizeHandler_MissingManifest(t *testing.T) {
 
 	agent := &store.Agent{
 		ID:           "agent_finalize_test",
-		AgentID:      "finalize-test-agent",
+		Slug:      "finalize-test-agent",
 		Name:         "test-agent",
 		GroveID:      "grove_finalize",
 		Status:       store.AgentStatusRunning,
@@ -283,7 +283,7 @@ func TestWorkspaceRoutesRequireAuth(t *testing.T) {
 
 	agent := &store.Agent{
 		ID:           "agent_auth_test",
-		AgentID:      "auth-test-agent",
+		Slug:      "auth-test-agent",
 		Name:         "test-agent",
 		GroveID:      "grove_auth",
 		Status:       store.AgentStatusRunning,
@@ -404,7 +404,7 @@ func TestWorkspaceSyncFromHandler_StorageNotConfigured(t *testing.T) {
 	// Create a running agent (no RuntimeBrokerID to avoid FK constraint)
 	agent := &store.Agent{
 		ID:           agentID,
-		AgentID:      "no-storage-agent",
+		Slug:      "no-storage-agent",
 		Name:         "test-agent",
 		GroveID:      groveID,
 		Status:       store.AgentStatusRunning,
@@ -445,7 +445,7 @@ func TestWorkspaceSyncToHandler_StorageNotConfigured(t *testing.T) {
 
 	agent := &store.Agent{
 		ID:           "agent_syncto_no_storage",
-		AgentID:      "sync-to-no-storage-agent",
+		Slug:      "sync-to-no-storage-agent",
 		Name:         "test-agent",
 		GroveID:      "grove_syncto_no_storage",
 		Status:       store.AgentStatusRunning,
@@ -482,7 +482,7 @@ func TestWorkspaceSyncToFinalizeHandler_StorageNotConfigured(t *testing.T) {
 
 	agent := &store.Agent{
 		ID:           "agent_finalize_no_storage",
-		AgentID:      "finalize-no-storage-agent",
+		Slug:      "finalize-no-storage-agent",
 		Name:         "test-agent",
 		GroveID:      "grove_finalize_no_storage",
 		Status:       store.AgentStatusRunning,
@@ -520,7 +520,7 @@ func TestWorkspaceSyncToFinalizeHandler_AgentNotRunning(t *testing.T) {
 	// Create a stopped agent
 	agent := &store.Agent{
 		ID:           "agent_finalize_stopped",
-		AgentID:      "finalize-stopped-agent",
+		Slug:      "finalize-stopped-agent",
 		Name:         "stopped-agent",
 		GroveID:      "grove_finalize_stopped",
 		Status:       store.AgentStatusStopped,
@@ -556,7 +556,7 @@ func TestWorkspaceMethodNotAllowed(t *testing.T) {
 
 	agent := &store.Agent{
 		ID:           "agent_method_test",
-		AgentID:      "method-test-agent",
+		Slug:      "method-test-agent",
 		Name:         "test-agent",
 		GroveID:      "grove_method",
 		Status:       store.AgentStatusRunning,
@@ -620,7 +620,7 @@ func TestWorkspaceSyncToHandler_InvalidJSON(t *testing.T) {
 
 	agent := &store.Agent{
 		ID:           "agent_invalid_json",
-		AgentID:      "invalid-json-agent",
+		Slug:      "invalid-json-agent",
 		Name:         "test-agent",
 		GroveID:      "grove_invalid_json",
 		Status:       store.AgentStatusRunning,
@@ -657,7 +657,7 @@ func TestWorkspaceSyncToFinalizeHandler_InvalidJSON(t *testing.T) {
 
 	agent := &store.Agent{
 		ID:           "agent_finalize_invalid",
-		AgentID:      "finalize-invalid-agent",
+		Slug:      "finalize-invalid-agent",
 		Name:         "test-agent",
 		GroveID:      "grove_finalize_invalid",
 		Status:       store.AgentStatusRunning,
@@ -719,7 +719,7 @@ func TestSyncToFinalizeResponse_JSONSerialization(t *testing.T) {
 func TestWorkspaceStatusResponse_JSONSerialization(t *testing.T) {
 	now := time.Now()
 	resp := WorkspaceStatusResponse{
-		AgentID:    "agent-123",
+		Slug:    "agent-123",
 		GroveID:    "grove-456",
 		StorageURI: "gs://bucket/workspaces/grove-456/agent-123/",
 		LastSync: &WorkspaceSyncInfo{
@@ -741,8 +741,8 @@ func TestWorkspaceStatusResponse_JSONSerialization(t *testing.T) {
 		t.Fatalf("failed to unmarshal WorkspaceStatusResponse: %v", err)
 	}
 
-	if parsed.AgentID != "agent-123" {
-		t.Errorf("agent ID = %q, want %q", parsed.AgentID, "agent-123")
+	if parsed.Slug != "agent-123" {
+		t.Errorf("agent ID = %q, want %q", parsed.Slug, "agent-123")
 	}
 	if parsed.GroveID != "grove-456" {
 		t.Errorf("grove ID = %q, want %q", parsed.GroveID, "grove-456")
@@ -771,7 +771,7 @@ func TestWorkspaceUnknownAction(t *testing.T) {
 
 	agent := &store.Agent{
 		ID:           "agent_unknown_action",
-		AgentID:      "unknown-action-agent",
+		Slug:      "unknown-action-agent",
 		Name:         "test-agent",
 		GroveID:      "grove_unknown",
 		Status:       store.AgentStatusRunning,

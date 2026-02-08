@@ -82,7 +82,7 @@ type GroveHeartbeat struct {
 
 // AgentHeartbeat is per-agent status in a heartbeat.
 type AgentHeartbeat struct {
-	AgentID         string `json:"agentId"`
+	Slug            string `json:"slug"` // Agent's URL-safe identifier
 	Status          string `json:"status"`
 	ContainerStatus string `json:"containerStatus,omitempty"`
 }

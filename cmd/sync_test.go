@@ -20,8 +20,8 @@ func TestResolveAgentID_AgentFound(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"agents": []map[string]interface{}{
-					{"agentId": "agent-id-1", "name": "my-agent", "status": "running"},
-					{"agentId": "agent-id-2", "name": "other-agent", "status": "stopped"},
+					{"slug": "agent-id-1", "name": "my-agent", "status": "running"},
+					{"slug": "agent-id-2", "name": "other-agent", "status": "stopped"},
 				},
 			})
 			return
@@ -50,7 +50,7 @@ func TestResolveAgentID_AgentNotFound(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"agents": []map[string]interface{}{
-					{"agentId": "agent-id-1", "name": "other-agent", "status": "running"},
+					{"slug": "agent-id-1", "name": "other-agent", "status": "running"},
 				},
 			})
 			return
@@ -79,7 +79,7 @@ func TestResolveAgentID_AgentNotRunning(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"agents": []map[string]interface{}{
-					{"agentId": "agent-id-1", "name": "my-agent", "status": "stopped"},
+					{"slug": "agent-id-1", "name": "my-agent", "status": "stopped"},
 				},
 			})
 			return

@@ -143,7 +143,7 @@ func createAgentViaHub(hubCtx *HubContext, agentName string) error {
 			brokerInfo = fmt.Sprintf(" on broker %s", resp.Agent.RuntimeBrokerID)
 		}
 		fmt.Printf("Agent '%s' created via Hub%s.\n", agentName, brokerInfo)
-		fmt.Printf("Agent ID: %s\n", resp.Agent.AgentID)
+		fmt.Printf("Agent Slug: %s\n", resp.Agent.Slug)
 		fmt.Printf("Status: %s\n", resp.Agent.Status)
 	} else {
 		fmt.Printf("Agent '%s' created via Hub.\n", agentName)

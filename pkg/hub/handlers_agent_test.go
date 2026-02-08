@@ -32,7 +32,7 @@ func TestAgentStatusUpdate_Authorization(t *testing.T) {
 	// Create two agents
 	agent1 := &store.Agent{
 		ID:      "agent-1",
-		AgentID: "agent-1-slug",
+		Slug: "agent-1-slug",
 		Name:    "Agent 1",
 		GroveID: grove.ID,
 		Status:  store.AgentStatusRunning,
@@ -41,7 +41,7 @@ func TestAgentStatusUpdate_Authorization(t *testing.T) {
 
 	agent2 := &store.Agent{
 		ID:      "agent-2",
-		AgentID: "agent-2-slug",
+		Slug: "agent-2-slug",
 		Name:    "Agent 2",
 		GroveID: grove.ID,
 		Status:  store.AgentStatusRunning,
@@ -138,7 +138,7 @@ func TestAgentStatusUpdate_Heartbeat(t *testing.T) {
 	// Create an agent
 	agent := &store.Agent{
 		ID:      "agent-h",
-		AgentID: "agent-h-slug",
+		Slug: "agent-h-slug",
 		Name:    "Agent Heartbeat",
 		GroveID: grove.ID,
 		Status:  store.AgentStatusRunning,
@@ -196,7 +196,7 @@ func setupOfflineBrokerAgent(t *testing.T, s store.Store, suffix string) (*store
 
 	agent := &store.Agent{
 		ID:              fmt.Sprintf("agent-offline-%s", suffix),
-		AgentID:         fmt.Sprintf("agent-offline-%s-slug", suffix),
+		Slug:         fmt.Sprintf("agent-offline-%s-slug", suffix),
 		Name:            fmt.Sprintf("Agent Offline %s", suffix),
 		GroveID:         grove.ID,
 		RuntimeBrokerID: broker.ID,
@@ -234,7 +234,7 @@ func TestDeleteAgent_NoBroker(t *testing.T) {
 
 	agent := &store.Agent{
 		ID:      "agent-nobroker",
-		AgentID: "agent-nobroker-slug",
+		Slug: "agent-nobroker-slug",
 		Name:    "Agent No Broker",
 		GroveID: grove.ID,
 		Status:  store.AgentStatusRunning,

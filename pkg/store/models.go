@@ -12,7 +12,7 @@ import (
 type Agent struct {
 	// Identity
 	ID       string `json:"id"`       // UUID primary key
-	AgentID  string `json:"agentId"`  // URL-safe slug identifier
+	Slug     string `json:"slug"`     // URL-safe slug identifier (unique per grove)
 	Name     string `json:"name"`     // Human-friendly display name
 	Template string `json:"template"` // Template used to create this agent
 
@@ -605,21 +605,19 @@ const (
 //
 // These functions convert persistence models to API models for external use.
 // Key ID semantics:
-//   - store.Agent.ID        = UUID (database primary key)
-//   - store.Agent.AgentID   = Slug (URL-safe identifier)
-//   - api.AgentInfo.ID      = Container/Runtime ID (runtime-assigned, may be empty for hosted mode)
-//   - api.AgentInfo.AgentID = Slug (same as store.Agent.AgentID)
+//   - store.Agent.ID   = UUID (database primary key, globally unique)
+//   - store.Agent.Slug = URL-safe identifier (unique per grove)
+//   - api.AgentInfo.ID   = Hub UUID (same as store.Agent.ID)
+//   - api.AgentInfo.Slug = URL-safe identifier (same as store.Agent.Slug)
+//   - api.AgentInfo.ContainerID = Runtime container ID (ephemeral, runtime-assigned)
 // =============================================================================
 
 // ToAPI converts a store.Agent to an api.AgentInfo for external consumption.
-// Note: The api.AgentInfo.ID field is intentionally left empty because in the
-// hosted context, the runtime container ID is not available at the Hub level.
-// Clients should use AgentID (slug) for identification.
 func (a *Agent) ToAPI() *api.AgentInfo {
 	info := &api.AgentInfo{
-		// Identity - Note: we do NOT set api.AgentInfo.ID here because it represents
-		// a container/runtime ID which is not known at the Hub level.
-		AgentID:  a.AgentID,
+		// Identity
+		ID:       a.ID,
+		Slug:     a.Slug,
 		Name:     a.Name,
 		Template: a.Template,
 

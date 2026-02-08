@@ -81,7 +81,7 @@ type ControlChannelClient struct {
 type StreamHandler struct {
 	streamID   string
 	streamType string
-	agentID    string
+	slug       string
 	dataCh     chan []byte
 	closeCh    chan struct{}
 	closed     bool
@@ -451,7 +451,7 @@ func (c *ControlChannelClient) handleStreamOpen(data []byte) error {
 		slog.Debug("Stream open requested via control channel",
 			"streamID", open.StreamID,
 			"type", open.StreamType,
-			"agentID", open.AgentID,
+			"slug", open.Slug,
 		)
 	}
 
@@ -459,7 +459,7 @@ func (c *ControlChannelClient) handleStreamOpen(data []byte) error {
 	handler := &StreamHandler{
 		streamID:   open.StreamID,
 		streamType: open.StreamType,
-		agentID:    open.AgentID,
+		slug:       open.Slug,
 		dataCh:     make(chan []byte, 256),
 		closeCh:    make(chan struct{}),
 	}
@@ -540,7 +540,7 @@ func (c *ControlChannelClient) handleStreamClose(data []byte) error {
 // This is a placeholder that will be fully implemented in Phase 5.
 func (c *ControlChannelClient) handlePTYStream(handler *StreamHandler, cols, rows int) {
 	slog.Info("PTY stream started via control channel",
-		"agentID", handler.agentID,
+		"slug", handler.slug,
 		"cols", cols,
 		"rows", rows,
 	)
@@ -549,7 +549,7 @@ func (c *ControlChannelClient) handlePTYStream(handler *StreamHandler, cols, row
 	// For now, just wait for close
 	<-handler.closeCh
 
-	slog.Info("PTY stream ended via control channel", "agentID", handler.agentID)
+	slog.Info("PTY stream ended via control channel", "slug", handler.slug)
 }
 
 // SendStreamData sends data on a stream.

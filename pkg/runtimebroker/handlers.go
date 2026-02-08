@@ -177,11 +177,11 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 
 	// Debug log incoming request
 	if s.config.Debug {
-		slog.Debug("Creating agent", "name", req.Name, "agentID", req.AgentID, "groveID", req.GroveID)
+		slog.Debug("Creating agent", "name", req.Name, "slug", req.Slug, "groveID", req.GroveID)
 		slog.Debug("Hub credentials",
 			"hubEndpoint", req.HubEndpoint,
 			"hasToken", req.AgentToken != "",
-			"agentID", req.AgentID,
+			"slug", req.Slug,
 		)
 		if req.Config != nil {
 			slog.Debug("Agent configuration",
@@ -237,10 +237,16 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 			slog.Debug("SCION_HUB_URL set", "url", hubEndpoint)
 		}
 	}
-	if req.AgentID != "" {
-		env["SCION_AGENT_ID"] = req.AgentID
+	if req.Slug != "" {
+		env["SCION_AGENT_SLUG"] = req.Slug
 		if s.config.Debug {
-			slog.Debug("SCION_AGENT_ID set", "id", req.AgentID)
+			slog.Debug("SCION_AGENT_SLUG set", "slug", req.Slug)
+		}
+	}
+	if req.ID != "" {
+		env["SCION_AGENT_ID"] = req.ID
+		if s.config.Debug {
+			slog.Debug("SCION_AGENT_ID set", "id", req.ID)
 		}
 	}
 
@@ -383,7 +389,7 @@ func (s *Server) getAgent(w http.ResponseWriter, r *http.Request, id string) {
 	}
 
 	for _, agent := range agents {
-		if agent.Name == id || agent.ID == id || agent.AgentID == id {
+		if agent.Name == id || agent.ContainerID == id || agent.Slug == id {
 			writeJSON(w, http.StatusOK, AgentInfoToResponse(agent))
 			return
 		}
@@ -404,7 +410,7 @@ func (s *Server) deleteAgent(w http.ResponseWriter, r *http.Request, id string) 
 	agents, err := s.manager.List(ctx, map[string]string{"scion.agent": "true"})
 	if err == nil {
 		for _, agent := range agents {
-			if agent.Name == id || agent.ID == id || agent.AgentID == id {
+			if agent.Name == id || agent.ContainerID == id || agent.Slug == id {
 				grovePath = agent.GrovePath
 				break
 			}

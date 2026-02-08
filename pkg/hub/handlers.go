@@ -252,15 +252,15 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 
 	// Create agent
 	agent := &store.Agent{
-		ID:            api.NewUUID(),
-		AgentID:       api.Slugify(req.Name),
-		Name:          req.Name,
-		Template:      req.Template,
-		GroveID:       req.GroveID,
+		ID:              api.NewUUID(),
+		Slug:            api.Slugify(req.Name),
+		Name:            req.Name,
+		Template:        req.Template,
+		GroveID:         req.GroveID,
 		RuntimeBrokerID: runtimeBrokerID,
-		Status:        store.AgentStatusPending,
-		Labels:        req.Labels,
-		Visibility:    store.VisibilityPrivate,
+		Status:          store.AgentStatusPending,
+		Labels:          req.Labels,
+		Visibility:      store.VisibilityPrivate,
 	}
 
 	if req.Config != nil {
@@ -414,7 +414,7 @@ func (s *Server) enrichAgent(ctx context.Context, agent *store.Agent, grove *sto
 			slog.Debug("failed to get runtime broker for enrichment", "brokerID", agent.RuntimeBrokerID, "error", err)
 		} else {
 			agent.RuntimeBrokerName = b.Name
-			slog.Debug("enriched agent with broker name", "agentID", agent.AgentID, "brokerName", b.Name)
+			slog.Debug("enriched agent with broker name", "slug", agent.Slug, "brokerName", b.Name)
 			if agent.Runtime == "" && len(b.Profiles) > 0 {
 				for _, p := range b.Profiles {
 					if p.Available {
@@ -1412,15 +1412,15 @@ func (s *Server) createGroveAgent(w http.ResponseWriter, r *http.Request, groveI
 
 	// Create agent
 	agent := &store.Agent{
-		ID:            api.NewUUID(),
-		AgentID:       api.Slugify(req.Name),
-		Name:          req.Name,
-		Template:      req.Template,
-		GroveID:       groveID,
+		ID:              api.NewUUID(),
+		Slug:            api.Slugify(req.Name),
+		Name:            req.Name,
+		Template:        req.Template,
+		GroveID:         groveID,
 		RuntimeBrokerID: runtimeBrokerID,
-		Status:        store.AgentStatusPending,
-		Labels:        req.Labels,
-		Visibility:    store.VisibilityPrivate,
+		Status:          store.AgentStatusPending,
+		Labels:          req.Labels,
+		Visibility:      store.VisibilityPrivate,
 	}
 
 	if req.Config != nil {

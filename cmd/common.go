@@ -384,7 +384,7 @@ func startAgentViaHub(hubCtx *HubContext, agentName, task string, resume bool) e
 	}
 	fmt.Printf("Agent '%s' %s via Hub.\n", agentName, displayStatus)
 	if resp.Agent != nil {
-		fmt.Printf("Agent ID: %s\n", resp.Agent.AgentID)
+		fmt.Printf("Agent Slug: %s\n", resp.Agent.Slug)
 		fmt.Printf("Status: %s\n", resp.Agent.Status)
 	}
 	for _, w := range resp.Warnings {

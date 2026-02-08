@@ -72,8 +72,8 @@ type SyncToFinalizeResponse struct {
 
 // WorkspaceStatusResponse is the response from getting workspace status.
 type WorkspaceStatusResponse struct {
-	// AgentID is the agent ID.
-	AgentID string `json:"agentId"`
+	// Slug is the agent's URL-safe identifier.
+	Slug string `json:"slug"`
 	// GroveID is the grove ID.
 	GroveID string `json:"groveId"`
 	// StorageURI is the GCS URI for the workspace storage.

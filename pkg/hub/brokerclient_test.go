@@ -101,7 +101,7 @@ func TestAuthenticatedBrokerClient_CreateAgent(t *testing.T) {
 
 	// Make request
 	req := &RemoteCreateAgentRequest{
-		AgentID: "agent-1",
+		Slug: "agent-1",
 		Name:    "test-agent",
 		GroveID: "grove-1",
 	}
@@ -248,7 +248,7 @@ func TestAuthenticatedBrokerClient_MissingSecret(t *testing.T) {
 
 	// Make request - should succeed but without signature
 	req := &RemoteCreateAgentRequest{
-		AgentID: "agent-1",
+		Slug: "agent-1",
 		Name:    "test-agent",
 		GroveID: "grove-1",
 	}
@@ -320,7 +320,7 @@ func TestAuthenticatedBrokerClient_ExpiredSecret(t *testing.T) {
 
 	// Make request - should proceed without signature due to expired secret
 	req := &RemoteCreateAgentRequest{
-		AgentID: "agent-1",
+		Slug: "agent-1",
 		Name:    "test-agent",
 		GroveID: "grove-1",
 	}

@@ -191,7 +191,7 @@ func (s *HeartbeatService) gatherGroveAgents() []hubclient.GroveHeartbeat {
 		}
 
 		agentHB := hubclient.AgentHeartbeat{
-			AgentID:         ag.Name,
+			Slug:            ag.Name, // Use Name as the slug identifier
 			Status:          ag.SessionStatus,
 			ContainerStatus: ag.ContainerStatus,
 		}

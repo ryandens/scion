@@ -156,7 +156,7 @@ func TestAgentList(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		agent := &store.Agent{
 			ID:           "agent_" + string(rune('a'+i)),
-			AgentID:      "test-agent-" + string(rune('a'+i)),
+			Slug:      "test-agent-" + string(rune('a'+i)),
 			Name:         "Test Agent " + string(rune('A'+i)),
 			GroveID:      grove.ID,
 			Status:       store.AgentStatusStopped,
@@ -249,8 +249,8 @@ func TestAgentCreate(t *testing.T) {
 		t.Fatal("expected agent to be set")
 	}
 
-	if resp.Agent.AgentID != "new-agent" {
-		t.Errorf("expected agentId 'new-agent', got %q", resp.Agent.AgentID)
+	if resp.Agent.Slug != "new-agent" {
+		t.Errorf("expected agentId 'new-agent', got %q", resp.Agent.Slug)
 	}
 
 	if resp.Agent.ID == "" {
@@ -444,7 +444,7 @@ func TestAgentGetByID(t *testing.T) {
 
 	agent := &store.Agent{
 		ID:           "agent_test1",
-		AgentID:      "test-agent",
+		Slug:      "test-agent",
 		Name:         "Test Agent",
 		GroveID:      grove.ID,
 		Status:       store.AgentStatusStopped,
@@ -510,7 +510,7 @@ func TestAgentDelete(t *testing.T) {
 
 	agent := &store.Agent{
 		ID:           "agent_delete",
-		AgentID:      "delete-me",
+		Slug:      "delete-me",
 		Name:         "Delete Me",
 		GroveID:      grove.ID,
 		Status:       store.AgentStatusStopped,

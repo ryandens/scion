@@ -4,8 +4,9 @@ import "time"
 
 // Agent represents an agent from the Hub API.
 type Agent struct {
-	ID              string            `json:"id"`
-	AgentID         string            `json:"agentId"`
+	ID              string            `json:"id"`              // Hub UUID (database primary key)
+	Slug            string            `json:"slug"`            // URL-safe slug identifier (unique per grove)
+	ContainerID     string            `json:"containerId"`     // Runtime container ID (ephemeral)
 	Name            string            `json:"name"`
 	Template        string            `json:"template,omitempty"`
 	GroveID         string            `json:"groveId,omitempty"`

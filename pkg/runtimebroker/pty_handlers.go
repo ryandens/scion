@@ -306,7 +306,7 @@ func (s *LocalPTYSession) writeToWebSocket(v interface{}) error {
 type StreamPTYHandler struct {
 	client      *ControlChannelClient
 	handler     *StreamHandler
-	agentID     string
+	slug        string
 	containerID string
 	cols        int
 	rows        int
@@ -323,7 +323,7 @@ func NewStreamPTYHandler(client *ControlChannelClient, handler *StreamHandler, c
 	return &StreamPTYHandler{
 		client:      client,
 		handler:     handler,
-		agentID:     handler.agentID,
+		slug:        handler.slug,
 		containerID: containerID,
 		cols:        cols,
 		rows:        rows,
@@ -472,6 +472,6 @@ func (h *StreamPTYHandler) Close() {
 func (c *ControlChannelClient) handlePTYStreamWithAgent(handler *StreamHandler, cols, rows int, containerID string) {
 	ptyHandler := NewStreamPTYHandler(c, handler, containerID, cols, rows)
 	if err := ptyHandler.Run(); err != nil && err != io.EOF {
-		slog.Error("PTY stream error", "agentID", handler.agentID, "error", err)
+		slog.Error("PTY stream error", "slug", handler.slug, "error", err)
 	}
 }

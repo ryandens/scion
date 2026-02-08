@@ -118,7 +118,7 @@ func (r *AppleContainerRuntime) List(ctx context.Context, labelFilter map[string
 		}
 
 		agents = append(agents, api.AgentInfo{
-			ID:              c.Configuration.ID,
+			ContainerID:     c.Configuration.ID,
 			Name:            c.Configuration.Labels["scion.name"],
 			Template:        c.Configuration.Labels["scion.template"],
 			Grove:           c.Configuration.Labels["scion.grove"],
@@ -149,8 +149,8 @@ func (r *AppleContainerRuntime) Attach(ctx context.Context, id string) error {
 
 	var a *api.AgentInfo
 	for _, agent := range agents {
-		// Match by full ID, or name
-		if agent.ID == id || agent.Name == id || strings.TrimPrefix(agent.Name, "/") == id {
+		// Match by full container ID, or name
+		if agent.ContainerID == id || agent.Name == id || strings.TrimPrefix(agent.Name, "/") == id {
 			a = &agent
 			break
 		}
@@ -167,7 +167,7 @@ func (r *AppleContainerRuntime) Attach(ctx context.Context, id string) error {
 	}
 
 	if a.Labels["scion.tmux"] == "true" {
-		return runInteractiveCommand(r.Command, "exec", "-it", "--user", "scion", a.ID, "tmux", "attach", "-t", "scion")
+		return runInteractiveCommand(r.Command, "exec", "-it", "--user", "scion", a.ContainerID, "tmux", "attach", "-t", "scion")
 	}
 
 	return fmt.Errorf("apple container runtime does not support 'attach' without tmux")
@@ -205,7 +205,7 @@ func (r *AppleContainerRuntime) GetWorkspacePath(ctx context.Context, id string)
 	}
 
 	for _, agent := range agents {
-		if agent.ID == id || agent.Name == id {
+		if agent.ContainerID == id || agent.Name == id {
 			// Check for workspace path in labels
 			if workspacePath, ok := agent.Labels["scion.workspace_path"]; ok && workspacePath != "" {
 				return workspacePath, nil
