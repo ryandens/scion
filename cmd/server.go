@@ -451,6 +451,7 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 	if cfg.RuntimeBroker.Enabled {
 		// Initialize runtime (auto-detect based on environment)
 		rt = runtime.GetRuntime("", "")
+		log.Printf("Runtime broker using runtime: %s", rt.Name())
 
 		// Create agent manager
 		mgr = agent.NewManager(rt)
@@ -685,12 +686,16 @@ func registerGlobalGroveAndBroker(ctx context.Context, s store.Store, brokerID, 
 			return fmt.Errorf("failed to create runtime broker: %w", err)
 		}
 	} else {
-		// Update existing broker status, endpoint, and auto-provide setting
+		// Update existing broker status, endpoint, auto-provide setting, and profiles
 		broker.Status = store.BrokerStatusOnline
 		broker.ConnectionState = "connected"
 		broker.Endpoint = endpoint
 		broker.AutoProvide = autoProvide
 		broker.LastHeartbeat = time.Now()
+		// Update profiles to reflect current runtime (may have changed if broker moved between hosts)
+		broker.Profiles = []store.BrokerProfile{
+			{Name: "default", Type: runtimeType, Available: true},
+		}
 		if err := s.UpdateRuntimeBroker(ctx, broker); err != nil {
 			return fmt.Errorf("failed to update runtime broker: %w", err)
 		}

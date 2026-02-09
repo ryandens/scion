@@ -9,6 +9,7 @@ import (
 	"github.com/ptone/scion-agent/pkg/api"
 	"github.com/ptone/scion-agent/pkg/config"
 	"github.com/ptone/scion-agent/pkg/k8s"
+	"github.com/ptone/scion-agent/pkg/util"
 )
 
 // GetRuntime returns the appropriate Runtime implementation based on environment,
@@ -16,6 +17,8 @@ import (
 func GetRuntime(grovePath string, profileName string) Runtime {
 	projectDir, _ := config.GetResolvedProjectDir(grovePath)
 	s, _ := config.LoadSettings(projectDir)
+
+	util.Debugf("GetRuntime: grovePath=%q, profileName=%q, projectDir=%q, hasSettings=%v", grovePath, profileName, projectDir, s != nil)
 
 	var rtConfig config.RuntimeConfig
 	var runtimeType string
@@ -25,19 +28,24 @@ func GetRuntime(grovePath string, profileName string) Runtime {
 		var rtName string
 		rtConfig, rtName, err = s.ResolveRuntime(profileName)
 		if err != nil {
+			util.Debugf("GetRuntime: ResolveRuntime failed: %v", err)
 			// If profile resolution fails, we might be passed a direct runtime type
 			// Fallback to legacy behavior for now if profileName matches a known type
 			if profileName == "docker" || profileName == "kubernetes" || profileName == "k8s" || profileName == "container" || profileName == "remote" || profileName == "local" {
 				runtimeType = profileName
+				util.Debugf("GetRuntime: using profileName as runtimeType: %s", runtimeType)
 			} else {
 				// Final fallback to auto-detection
 				runtimeType = "auto"
+				util.Debugf("GetRuntime: fallback to auto-detection")
 			}
 		} else {
 			runtimeType = rtName
+			util.Debugf("GetRuntime: resolved runtime from settings: %s", runtimeType)
 		}
 	} else {
 		runtimeType = "auto"
+		util.Debugf("GetRuntime: no settings found, using auto-detection")
 	}
 
 	// Normalize runtime names
@@ -46,20 +54,26 @@ func GetRuntime(grovePath string, profileName string) Runtime {
 	}
 
 	if runtimeType == "local" || runtimeType == "auto" {
+		util.Debugf("GetRuntime: auto-detecting for OS=%s", runtime.GOOS)
 		if runtime.GOOS == "darwin" {
 			if _, err := exec.LookPath("container"); err == nil {
 				runtimeType = "container"
+				util.Debugf("GetRuntime: detected 'container' CLI on macOS")
 			} else {
 				runtimeType = "docker"
+				util.Debugf("GetRuntime: 'container' CLI not found on macOS, using docker")
 			}
 		} else {
 			runtimeType = "docker"
+			util.Debugf("GetRuntime: non-macOS platform, using docker")
 		}
 	}
 
 	if runtimeType == "remote" {
 		runtimeType = "kubernetes"
 	}
+
+	util.Debugf("GetRuntime: final runtime type: %s", runtimeType)
 
 	switch runtimeType {
 	case "container":
