@@ -15,7 +15,7 @@ The current system provides basic environment-variable-style secrets (key-value 
 - **Pluggable storage**: Define an abstract storage interface with a primary GCP Secret Manager implementation.
 - **Runtime-aware projection**: Each runtime (Docker, Apple, Kubernetes, Cloud Run) projects secrets using its native capabilities.
 - **Least-privilege**: Secrets are write-only in the Hub API, decrypted only at provisioning time, and scoped to the narrowest context required.
-- **Backward compatibility**: The existing `EnvVar` and `Secret` store models and API endpoints continue to work. The new typed secret model is layered alongside them.
+- **Clear separation from env vars**: The existing plain-text `EnvVar` system remains as-is for non-sensitive configuration. Secrets are a distinct system with encrypted storage and controlled projection. The existing `Secret` store model (which was not in use) is upgraded in place to support the new typed secret model.
 
 ### 1.2 Non-Goals (This Iteration)
 
@@ -91,6 +91,11 @@ const (
     ScopeUser          Scope = "user"
     ScopeGrove         Scope = "grove"
     ScopeRuntimeBroker Scope = "runtime_broker"
+    // ScopeAgent is reserved for future use. Agent-scoped secrets would be
+    // tied to a specific agent instance. The current design accommodates this
+    // as a future addition without breaking changes to the resolution logic
+    // (it would slot in as the highest-priority scope).
+    // ScopeAgent Scope = "agent"
 )
 ```
 
@@ -134,9 +139,9 @@ func NewFileSecret(name, filePath string, content []byte, scope Scope, scopeID s
 }
 ```
 
-### 2.4 Store Model Extension
+### 2.4 Store Model
 
-The existing `store.Secret` model is extended with type and target fields:
+The `Secret` store model is upgraded in place with type, target, and audit metadata fields:
 
 ```go
 // In pkg/store/models.go
@@ -146,7 +151,7 @@ type Secret struct {
     Key            string    `json:"key"`
     EncryptedValue string    `json:"-"`
 
-    // NEW: Secret type and target
+    // Secret type and target
     SecretType string `json:"secretType"` // "environment", "variable", "file"
     Target     string `json:"target"`     // env var name, logical key, or file path
 
@@ -157,18 +162,20 @@ type Secret struct {
 
     Created   time.Time `json:"created"`
     Updated   time.Time `json:"updated"`
-    CreatedBy string    `json:"createdBy,omitempty"`
+    CreatedBy string    `json:"createdBy"`
     UpdatedBy string    `json:"updatedBy,omitempty"`
 }
 ```
 
-Default behavior: if `SecretType` is empty, the secret is treated as `TypeEnvironment` with `Target` defaulting to `Key`. This preserves backward compatibility with existing secrets.
+Default behavior: if `SecretType` is empty, the secret is treated as `TypeEnvironment` with `Target` defaulting to `Key`.
 
 ---
 
 ## 3. Storage Interface
 
 ### 3.1 Abstract Interface
+
+The higher-level business logic interface for secret storage is `secret.SecretBackend`. This is distinct from the low-level database persistence layer (`store.SecretStore`) to avoid naming confusion (see Section 3.3).
 
 ```go
 package secret
@@ -183,8 +190,10 @@ type Filter struct {
     Name    string // Optional: filter by exact name
 }
 
-// Store defines the abstract interface for secret storage backends.
-type Store interface {
+// SecretBackend defines the abstract interface for secret storage backends.
+// This is the business-logic layer that may delegate to store.SecretStore,
+// GCP Secret Manager, or other backends for actual persistence.
+type SecretBackend interface {
     // Get retrieves a secret by name within a scope.
     // Returns the secret with its decrypted value.
     Get(ctx context.Context, name string, scope Scope, scopeID string) (Secret, error)
@@ -218,21 +227,23 @@ The `Resolve` method implements the same hierarchical merge used for environment
 
 Within the same scope, secrets with the same `Name` are deduplicated (last write wins). Across scopes, higher-priority scopes override lower ones when names collide.
 
+> **Future consideration:** Agent-scoped secrets (see Section 2.2) would slot in as the highest-priority scope, overriding runtime broker scope when present.
+
 ### 3.3 Relationship to Existing Stores
 
-The `secret.Store` interface is distinct from `store.SecretStore`. The latter is the low-level database persistence layer (SQLite/Postgres). The former is the higher-level abstraction that may delegate to `store.SecretStore`, GCP Secret Manager, or other backends.
+The `secret.SecretBackend` interface is the higher-level business logic abstraction. The `store.SecretStore` interface is the low-level database persistence layer (SQLite/Postgres) that handles metadata and encrypted value storage. `SecretBackend` implementations may delegate to `store.SecretStore`, GCP Secret Manager, or other backends.
 
 ```
-                          ┌──────────────┐
-                          │ secret.Store │  (business logic interface)
-                          └──────┬───────┘
-                                 │
-                 ┌───────────────┼───────────────┐
-                 │               │               │
-         ┌───────────┐   ┌─────────────┐   ┌──────────┐
-         │ SQLite     │   │ GCP Secret  │   │ Vault    │
-         │ (existing) │   │ Manager     │   │ (future) │
-         └───────────┘   └─────────────┘   └──────────┘
+                     ┌──────────────────────┐
+                     │ secret.SecretBackend │  (business logic interface)
+                     └──────────┬───────────┘
+                                │
+                ┌───────────────┼───────────────┐
+                │               │               │
+        ┌───────────┐   ┌─────────────┐   ┌──────────┐
+        │ SQLite     │   │ GCP Secret  │   │ Vault    │
+        │ (existing) │   │ Manager     │   │ (future) │
+        └───────────┘   └─────────────┘   └──────────┘
 ```
 
 ---
@@ -276,7 +287,7 @@ import (
     "github.com/ptone/scion-agent/pkg/secret"
 )
 
-// GCPStore implements secret.Store using GCP Secret Manager.
+// GCPStore implements secret.SecretBackend using GCP Secret Manager.
 type GCPStore struct {
     client    *secretmanager.Client
     projectID string
@@ -313,7 +324,9 @@ func (s *GCPStore) Get(ctx context.Context, name string, scope secret.Scope, sco
 
 ### 4.4 Metadata Storage
 
-GCP Secret Manager supports labels on secret resources. Scion stores the following metadata as labels:
+The **Hub database is the primary metadata store** for all secret metadata (name, type, target, scope, version, audit fields). GCP Secret Manager stores the encrypted secret values and may additionally carry supplementary labels for cross-referencing. These labels should match the native Scion types stored in the Hub database.
+
+GCP Secret Manager supports labels on secret resources. Scion stores the following supplementary metadata as labels:
 
 | Label Key | Value | Purpose |
 |-----------|-------|---------|
@@ -322,15 +335,29 @@ GCP Secret Manager supports labels on secret resources. Scion stores the followi
 | `scion-type` | `environment`, `variable`, `file` | Secret type |
 | `scion-target` | URL-encoded target | Projection target |
 
-### 4.5 Hybrid Storage Option
+These labels are maintained for operational convenience (e.g., GCP Console visibility, cross-referencing) but the Hub database remains the authoritative source for secret metadata.
 
-For deployments that prefer not to use GCP Secret Manager for all secrets, a hybrid approach is possible:
+### 4.5 Hybrid Storage (Default)
 
-- **Secret metadata** (name, type, target, scope, version) stored in the Hub database.
-- **Secret values** stored in GCP Secret Manager, referenced by a `secretRef` field.
-- The `secret.Store` implementation joins metadata from the database with values from GCP SM.
+The default storage architecture uses a hybrid approach:
 
-This keeps the Hub database as the metadata authority while delegating value encryption to GCP.
+- **Secret metadata** (name, type, target, scope, version, audit fields) stored in the Hub database.
+- **Secret values** stored in GCP Secret Manager, referenced by a `secretRef` field in the Hub database record.
+- The `secret.SecretBackend` implementation joins metadata from the database with values from GCP SM.
+
+This keeps the Hub database as the metadata authority, enabling simple listing and visibility in the web UI and CLI without requiring GCP Secret Manager list API calls, while delegating value encryption to GCP.
+
+```
+┌─────────────┐          ┌───────────────────┐
+│ Hub Database │◀────────│ secret.SecretBackend │
+│ (metadata)   │         │ (joins both)        │
+└─────────────┘          └─────────┬──────────┘
+                                   │
+                          ┌────────▼────────┐
+                          │ GCP Secret Mgr  │
+                          │ (encrypted vals) │
+                          └─────────────────┘
+```
 
 ---
 
@@ -358,12 +385,15 @@ type CreateAgentRequest struct {
 // ResolvedSecret is a secret resolved by the Hub for runtime projection.
 type ResolvedSecret struct {
     Name   string `json:"name"`
-    Type   string `json:"type"`   // "environment", "variable", "file"
-    Target string `json:"target"` // env var name or file path
-    Value  string `json:"value"`  // plaintext value (base64-encoded for file type)
-    Source string `json:"source"` // scope that provided this secret (for diagnostics)
+    Type   string `json:"type"`            // "environment", "variable", "file"
+    Target string `json:"target"`          // env var name or file path
+    Value  string `json:"value,omitempty"` // plaintext value (base64-encoded for file type)
+    Source string `json:"source"`          // scope that provided this secret (for diagnostics)
+    Ref    string `json:"ref,omitempty"`   // GCP SM reference for K8s/Cloud Run (e.g., "projects/my-proj/secrets/scion-user-abc-API_KEY/versions/latest")
 }
 ```
+
+For Docker and Apple runtimes, `Value` is populated with the plaintext secret value. For Kubernetes and Cloud Run, `Ref` is populated with a GCP Secret Manager reference instead, allowing the runtime to resolve values natively without plaintext transit through the Hub.
 
 ### 5.2 Docker Runtime
 
@@ -381,20 +411,40 @@ for _, s := range resolvedSecrets {
 ```
 
 #### File Secrets
-Written to the agent's provisioning home directory before container start. The home directory is already bind-mounted into the container, so files placed there are immediately available:
+
+File secrets are stored in a dedicated `secrets/` directory within the agent's provisioning directory, separate from the agent's home directory. This prevents secrets from being exposed inside the container's home mount.
+
+**Host directory layout:**
+```
+.scion/agents/
+  <agentName>/
+    secrets/       ← secret files stored here (host-only)
+      secretA
+      secretB
+    home/          ← bind-mounted as /home/scion
+    workspace/     ← bind-mounted as /workspace
+```
+
+Each secret file is written to the `secrets/` directory on the host, then bind-mounted directly to its target path inside the container:
 
 ```go
 for _, s := range resolvedSecrets {
     if s.Type == "file" {
-        // Write the secret file to the agent's home directory tree
-        hostPath := filepath.Join(homeDir, s.Target)
+        // Write secret to the agent's secrets directory (NOT home)
+        hostPath := filepath.Join(agentDir, "secrets", s.Name)
         os.MkdirAll(filepath.Dir(hostPath), 0700)
         os.WriteFile(hostPath, []byte(s.Value), 0600)
+
+        // Bind-mount to the secret's target path inside the container
+        addArg("--mount", fmt.Sprintf(
+            "type=bind,source=%s,target=%s,readonly",
+            hostPath, s.Target,
+        ))
     }
 }
 ```
 
-If the target path is absolute and outside the home directory, an alternative is to use Docker's `--mount type=tmpfs` for a scratch area, but the simpler approach is to constrain file secret targets to paths relative to the container home or use additional bind mounts.
+This respects the secret's declared target path (which may be anywhere in the container filesystem) without exposing secret files inside the home directory mount.
 
 #### Variable Secrets
 Variable-type secrets are not automatically injected. They are stored in a metadata file within the home directory that tooling (e.g., `sciontool`) can read:
@@ -405,21 +455,43 @@ Variable-type secrets are not automatically injected. They are stored in a metad
 
 ### 5.3 Apple Container Runtime
 
-The Apple Virtualization Framework (`container` CLI) supports bind mounts of directories but has limited support for individual file mounts. This creates challenges for file-type secrets.
+The Apple Virtualization Framework (`container` CLI) supports bind mounts of directories but has limited support for individual file mounts. This requires a different approach for file-type secrets than Docker.
 
 #### Environment Secrets
 Same as Docker—passed via `-e` flags. The Apple runtime reuses `buildCommonRunArgs()`.
 
-#### File Secrets — Proposed Approaches
+#### File Secrets — Init Script Injection via sciontool
 
-| Approach | Description | Pros | Cons |
-|----------|-------------|------|------|
-| **A. Home directory hydration** (Recommended) | Write secret files into the agent's provisioning home directory before container start. Since the home dir is bind-mounted, files appear inside the container. | Simple, consistent with Docker. No runtime-specific logic needed. | Target path must be within the home directory mount. Secrets persist on the host filesystem. |
-| **B. Init script injection** | Write secrets to a staging directory. Add an init script that copies them to their target paths on container start. | Supports arbitrary target paths. | Adds complexity. Requires modifying the container entrypoint. Race condition between init and agent start. |
-| **C. Directory mount with symlinks** | Mount a secrets directory into the container. Create symlinks from target paths to the mounted files. | Clean separation. Secrets in a single known location. | Symlink creation requires init logic. Apple container may not support all symlink scenarios. |
-| **D. `container exec` post-start** | After the container starts, use `container exec` to write secret files into the running container. | Supports arbitrary paths. No entrypoint modification. | Race condition with agent process. Requires container to be running. Additional exec overhead. |
+Since the Apple container runtime cannot bind-mount individual files to arbitrary target paths, file secrets use a copy-on-init approach managed by `sciontool`:
 
-**Recommendation:** Approach A (home directory hydration) for the initial implementation. This works identically to Docker since both runtimes mount the agent home directory. For targets outside the home directory, fall back to Approach D (`container exec` post-start) with a short delay to ensure the container is ready.
+1. **Provisioning**: The broker writes secret files into the agent's `secrets/` directory on the host (same layout as Docker). Since this directory is separate from the home directory, secrets are available to the provisioner but not directly exposed inside the container.
+
+2. **Secret map**: The provisioner writes a `secret-map.json` file alongside the secrets, describing where each secret file should be placed inside the container:
+
+```json
+{
+    "secrets": [
+        {
+            "name": "gcp-credentials",
+            "source": "secrets/gcp-credentials",
+            "target": "/home/scion/.config/gcloud/credentials.json",
+            "mode": "0600"
+        },
+        {
+            "name": "tls-cert",
+            "source": "secrets/tls-cert",
+            "target": "/etc/ssl/certs/agent.pem",
+            "mode": "0644"
+        }
+    ]
+}
+```
+
+3. **Container start**: The `secrets/` directory is bind-mounted into the container at a well-known staging path (e.g., `/run/scion-secrets/`). On startup, `sciontool` reads `secret-map.json` and copies each secret file from the staging path to its declared target path, creating parent directories as needed. The entrypoint does not need variable arguments—the logic is fixed and data-driven by the map file.
+
+4. **Cleanup**: After copying, `sciontool` removes the staging mount contents from the container filesystem.
+
+This approach supports arbitrary target paths without modifying the container entrypoint arguments, and keeps the init logic fixed and deterministic.
 
 #### Variable Secrets
 Same as Docker—written to `~/.scion/secrets.json`.
@@ -533,10 +605,10 @@ This is the cleanest integration since Cloud Run natively resolves GCP Secret Ma
 | Capability | Docker | Apple | Kubernetes | Cloud Run |
 |------------|--------|-------|------------|-----------|
 | **Env secrets** | `-e` flag | `-e` flag | `envFrom` / `env.valueFrom` | `env.valueFrom` |
-| **File secrets** | Home dir hydration | Home dir hydration | Volume mount / CSI | Volume mount |
+| **File secrets** | Bind mount to target path | Copy-on-init via sciontool | Volume mount / CSI | Volume mount |
 | **Variable secrets** | `secrets.json` | `secrets.json` | ConfigMap or `secrets.json` | `secrets.json` |
 | **GCP SM native** | No (values passed) | No (values passed) | Yes (CSI / ESO) | Yes (native) |
-| **Secret in etcd/disk** | Host filesystem | Host filesystem | Optional (CSI avoids) | Never |
+| **Secret in etcd/disk** | Host `secrets/` dir | Host `secrets/` dir | Optional (CSI avoids) | Never |
 
 ---
 
@@ -583,7 +655,9 @@ For `file` type secrets, `value` should be base64-encoded.
   "description": "Anthropic API key for Claude agents",
   "version": 3,
   "created": "2026-01-24T10:00:00Z",
-  "updated": "2026-02-11T14:30:00Z"
+  "updated": "2026-02-11T14:30:00Z",
+  "createdBy": "user-abc",
+  "updatedBy": "user-abc"
 }
 ```
 
@@ -622,7 +696,7 @@ GET /api/v1/agents/{agentId}/resolved-secrets
 The `scion hub secret set` command is extended:
 
 ```bash
-# Environment secret (default, backward compatible)
+# Environment secret (default)
 scion hub secret set API_KEY sk-ant-...
 
 # Explicit type
@@ -637,6 +711,14 @@ scion hub secret set --type=variable config-value '{"setting": true}'
 
 The `@` prefix for values reads from a local file (similar to `curl -d @file`).
 
+The `scion hub env --secret` flag is a CLI convenience that translates the operation into a secret resource creation (environment-type secret). This keeps the env var system cleanly separated—`--secret` does not set an `EnvVar` record with `Secret: true`, but instead creates a proper `Secret` resource with `type=environment`.
+
+```bash
+# These two commands are equivalent:
+scion hub env --secret ANTHROPIC_API_KEY sk-ant-...
+scion hub secret set --type=environment --target=ANTHROPIC_API_KEY ANTHROPIC_API_KEY sk-ant-...
+```
+
 ---
 
 ## 7. Security Considerations
@@ -644,7 +726,7 @@ The `@` prefix for values reads from a local file (similar to `curl -d @file`).
 ### 7.1 Value Transmission
 
 - Secret values are transmitted over TLS between Hub and Runtime Brokers.
-- For Docker and Apple runtimes, decrypted values traverse the control channel (WebSocket over TLS) and are present on the broker host filesystem (in the home directory) and in the container process environment.
+- For Docker and Apple runtimes, decrypted values traverse the control channel (WebSocket over TLS) and are present on the broker host filesystem (in the agent's `secrets/` directory) and in the container process environment.
 - For Kubernetes and Cloud Run, the GCP Secret Manager CSI driver or native integration avoids transmitting plaintext values through the Hub at all—only secret references are passed.
 
 ### 7.2 Value at Rest
@@ -653,7 +735,7 @@ The `@` prefix for values reads from a local file (similar to `curl -d @file`).
 |-----------|-----------|-------|
 | Hub database | Application-level encryption (existing) | `EncryptedValue` field, encrypted before storage |
 | GCP Secret Manager | Envelope encryption (Google KMS) | Automatic, configurable CMEK |
-| Docker host filesystem | Dependent on host disk encryption | Files in agent home directory |
+| Docker host filesystem | Dependent on host disk encryption | Files in agent `secrets/` directory |
 | Kubernetes etcd | K8s encryption-at-rest config | Avoidable with CSI driver |
 
 ### 7.3 Value Lifecycle
@@ -669,6 +751,10 @@ The `@` prefix for values reads from a local file (similar to `curl -d @file`).
 - The `ResolvedSecrets` field should be redacted in request/response logging.
 - File contents for file-type secrets should never be logged.
 
+### 7.5 File Secret Size Limits
+
+File-type secrets are limited to **64 KiB** to match GCP Secret Manager's per-version limit. This is sufficient for certificates, credential files, and small configuration files. Larger files should use the existing template/workspace mechanisms.
+
 ---
 
 ## 8. Migration Path
@@ -676,21 +762,23 @@ The `@` prefix for values reads from a local file (similar to `curl -d @file`).
 ### 8.1 Phase 1: Type-Aware Store Model
 
 1. Add `SecretType` and `Target` columns to the secrets table (nullable, defaulting to `"environment"` and `Key` respectively).
-2. Update `store.SecretStore` interface and SQLite implementation.
-3. Update Hub API handlers to accept and return the new fields.
-4. Update CLI `hub secret set/get` commands.
+2. Add `CreatedBy` and `UpdatedBy` audit columns to the secrets table.
+3. Update `store.SecretStore` interface and SQLite implementation.
+4. Update Hub API handlers to accept and return the new fields.
+5. Update CLI `hub secret set/get` commands.
+6. Implement `scion hub env --secret` as a convenience that creates a secret resource.
 
 ### 8.2 Phase 2: Runtime Projection
 
 1. Add `ResolvedSecrets` to `CreateAgentRequest`.
 2. Implement projection logic in the Runtime Broker's `CreateAgent` handler.
-3. Docker: env injection and home directory file hydration.
-4. Apple: same as Docker (home directory hydration).
+3. Docker: env injection and bind-mount file secrets to target paths.
+4. Apple: env injection and copy-on-init via `sciontool` with `secret-map.json`.
 
 ### 8.3 Phase 3: GCP Secret Manager Backend
 
-1. Implement `secret.Store` backed by GCP Secret Manager.
-2. Configuration to select backend (SQLite-encrypted vs GCP SM).
+1. Implement `secret.SecretBackend` using hybrid storage (Hub DB metadata + GCP SM values).
+2. Configuration to select backend (SQLite-encrypted vs hybrid GCP SM).
 3. Migration tooling to move existing secrets from SQLite to GCP SM.
 
 ### 8.4 Phase 4: Native K8s/Cloud Run Integration
@@ -701,83 +789,46 @@ The `@` prefix for values reads from a local file (similar to `curl -d @file`).
 
 ---
 
-## 9. Open Questions
+## 9. Decisions & Future Considerations
 
-### 9.1 Secret Reference vs. Value in Dispatch
+This section records decisions made during design review and topics deferred to future iterations.
 
-**Question:** Should the Hub always send plaintext values to the Broker, or should it send GCP Secret Manager references that the Broker resolves locally?
+### 9.1 Secret Reference vs. Value in Dispatch — Decided
 
-- **Plaintext dispatch** (current design for Docker/Apple): Simple, runtime-agnostic. The Hub resolves everything.
-- **Reference dispatch** (possible for K8s/Cloud Run): More secure—the Broker or runtime resolves the reference directly from GCP SM. But requires the Broker (or the K8s service account) to have GCP SM read access.
+**Decision:** Use plaintext dispatch for Docker and Apple runtimes. Use reference dispatch for Kubernetes and Cloud Run where native GCP SM integration is available. The `ResolvedSecret` type includes an optional `Ref` field (see Section 5.1) to carry GCP Secret Manager references.
 
-**Proposal:** Use plaintext dispatch for Docker and Apple. Use reference dispatch for Kubernetes and Cloud Run where native integration is available. The `ResolvedSecret` type could include an optional `ref` field:
+### 9.2 File Secret Size Limits — Decided
 
-```go
-type ResolvedSecret struct {
-    // ... existing fields ...
-    Ref string `json:"ref,omitempty"` // e.g., "projects/my-proj/secrets/scion-user-abc-API_KEY/versions/latest"
-}
-```
+**Decision:** Enforce a 64 KiB limit for file secrets to match GCP Secret Manager limits. Larger files should use the existing template/workspace mechanisms. See Section 7.5.
 
-### 9.2 File Secret Size Limits
+### 9.3 Apple Container File Mounts — Decided
 
-**Question:** What is the maximum size for file-type secrets?
+**Decision:** Use the copy-on-init approach via `sciontool` (Section 5.3). Secret files are placed in the provisioning directory and a `secret-map.json` file drives the init-time copy to target paths. This supports arbitrary target paths without requiring variable entrypoint arguments.
 
-GCP Secret Manager has a 64 KiB per-version limit. This is sufficient for certificates, credential files, and small config files but not for large binary blobs. Should Scion enforce a similar limit, or support larger files via GCS-backed storage?
+### 9.4 Required Secrets in Templates — Decided
 
-**Proposal:** Enforce a 64 KiB limit for file secrets to match GCP SM limits. Larger files should use the existing template/workspace mechanisms.
+**Decision:** Templates can declare required secrets using the existing pattern of declaring an env key with no value. At resolve time, the system determines whether the value comes from the `EnvVar` store (plain text) or the `Secret` store (encrypted), and fails fast with a clear error if a required key has no value in any applicable scope.
 
-### 9.3 Apple Container File Mounts
+### 9.5 Env Var / Secret Separation — Decided
 
-**Question:** What is the best long-term approach for file secrets on Apple containers?
+**Decision:** Env vars and secrets are two distinct systems:
 
-The home directory hydration approach (5.3, Approach A) works for most cases but constrains target paths to the home directory. If Apple's `container` CLI adds individual file mount support in the future, the projection logic should be updated.
+- **Env vars** (`EnvVar` model): Stored in the Hub database in plain text. No secret-manager integration. Used for non-sensitive configuration.
+- **Secrets** (`Secret` model): Stored with encrypted values (Hub DB or GCP SM). Used for sensitive values.
 
-**Monitoring:** Track Apple container runtime releases for file mount support. In the interim, document the target path constraint for Apple users.
+The `EnvVar.Secret` bool flag is **not** used as the implementation for secret environment variables. Instead, `scion hub env --secret` is a CLI-only convenience that translates the command into an operation on a `Secret` resource with `type=environment`. This keeps the two systems cleanly separated.
 
-### 9.4 Secret Scope for Templates
+### 9.6 Secret Versioning and Rollback — Deferred
 
-**Question:** Should templates be able to declare "required secrets" that must be present for an agent to start?
+Always use the latest version for now. Version pinning adds complexity to the resolution logic and agent creation flow. GCP SM's native versioning can be exposed later if needed.
 
-For example, a Claude template could declare that `ANTHROPIC_API_KEY` is required. During agent creation, the Hub would verify that the secret exists in one of the applicable scopes and fail fast with a clear error if it's missing.
+### 9.7 Cross-Grove Secret Sharing — Deferred
 
-**Proposal:** Add an optional `requiredSecrets` field to `TemplateConfig`:
+User-scope secrets already solve cross-grove sharing. Document that user-scope is the recommended approach. Organization/team-scope secrets can be added as a future enhancement when user and groups functionality is implemented.
 
-```go
-type TemplateConfig struct {
-    // ... existing fields ...
-    RequiredSecrets []RequiredSecret `json:"requiredSecrets,omitempty"`
-}
+### 9.8 Agent-Scoped Secrets — Deferred
 
-type RequiredSecret struct {
-    Name string `json:"name"`           // Secret name to look for
-    Type string `json:"type,omitempty"` // Expected type (optional)
-}
-```
-
-### 9.5 Env Var / Secret Unification
-
-**Question:** The current system has separate `EnvVar` and `Secret` models with overlapping capabilities (env vars can have `Secret: true`). Should these be unified?
-
-The `EnvVar` model supports a `Secret` bool flag and an `InjectionMode` field. The `Secret` model is write-only with encrypted storage. With the introduction of typed secrets, there's an opportunity to consolidate.
-
-**Proposal:** Defer unification. The existing separation works and avoids a risky migration. The new typed secret model builds on the `Secret` store, not `EnvVar`. The `EnvVar.Secret` flag continues to work as a convenience for simple cases where users want to set a secret env var without thinking about the typed system.
-
-### 9.6 Secret Versioning and Rollback
-
-**Question:** Should Scion support accessing specific secret versions or rolling back?
-
-GCP Secret Manager natively supports versioning. The current design always uses `latest`. Should the `Resolve` endpoint support pinning a version?
-
-**Proposal:** Defer. Always use latest for now. Version pinning adds complexity to the resolution logic and agent creation flow. If needed, GCP SM's native versioning can be exposed later.
-
-### 9.7 Cross-Grove Secret Sharing
-
-**Question:** Can secrets be shared across groves without duplication?
-
-Currently, secrets are scoped to a single grove. A user who works on multiple groves with the same API key must set it in each grove or use user-scope secrets.
-
-**Proposal:** User-scope secrets already solve this. Document that user-scope is the recommended approach for cross-grove secrets. Organization/team-scope secrets could be added later as part of the groups/permissions system.
+Agent-scoped secrets (tied to a specific agent instance) are a possible future addition. The current design accommodates this by reserving `ScopeAgent` in the scope enum (see Section 2.2). Implementation is deferred to a future iteration.
 
 ---
 
