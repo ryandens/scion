@@ -78,6 +78,7 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		migrationV11,
 		migrationV12,
 		migrationV13,
+		migrationV14,
 	}
 
 	// Create migrations table if not exists
@@ -473,6 +474,10 @@ ALTER TABLE env_vars ADD COLUMN secret INTEGER NOT NULL DEFAULT 0;
 const migrationV13 = `
 ALTER TABLE secrets ADD COLUMN secret_type TEXT NOT NULL DEFAULT 'environment';
 ALTER TABLE secrets ADD COLUMN target TEXT;
+`
+
+const migrationV14 = `
+ALTER TABLE secrets ADD COLUMN secret_ref TEXT;
 `
 
 // Helper functions for JSON marshaling/unmarshaling
@@ -2200,10 +2205,11 @@ func (s *SQLiteStore) CreateSecret(ctx context.Context, secret *store.Secret) er
 	}
 
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO secrets (id, key, encrypted_value, secret_type, target, scope, scope_id, description, version, created_at, updated_at, created_by, updated_by)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO secrets (id, key, encrypted_value, secret_ref, secret_type, target, scope, scope_id, description, version, created_at, updated_at, created_by, updated_by)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
-		secret.ID, secret.Key, secret.EncryptedValue, secret.SecretType, nullableString(secret.Target),
+		secret.ID, secret.Key, secret.EncryptedValue, nullableString(secret.SecretRef),
+		secret.SecretType, nullableString(secret.Target),
 		secret.Scope, secret.ScopeID,
 		secret.Description, secret.Version,
 		secret.Created, secret.Updated, secret.CreatedBy, secret.UpdatedBy,
@@ -2220,12 +2226,14 @@ func (s *SQLiteStore) CreateSecret(ctx context.Context, secret *store.Secret) er
 func (s *SQLiteStore) GetSecret(ctx context.Context, key, scope, scopeID string) (*store.Secret, error) {
 	secret := &store.Secret{}
 	var target sql.NullString
+	var secretRef sql.NullString
 
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, key, encrypted_value, secret_type, COALESCE(target, key), scope, scope_id, description, version, created_at, updated_at, created_by, updated_by
+		SELECT id, key, encrypted_value, secret_ref, secret_type, COALESCE(target, key), scope, scope_id, description, version, created_at, updated_at, created_by, updated_by
 		FROM secrets WHERE key = ? AND scope = ? AND scope_id = ?
 	`, key, scope, scopeID).Scan(
-		&secret.ID, &secret.Key, &secret.EncryptedValue, &secret.SecretType, &target,
+		&secret.ID, &secret.Key, &secret.EncryptedValue, &secretRef,
+		&secret.SecretType, &target,
 		&secret.Scope, &secret.ScopeID,
 		&secret.Description, &secret.Version,
 		&secret.Created, &secret.Updated, &secret.CreatedBy, &secret.UpdatedBy,
@@ -2239,6 +2247,9 @@ func (s *SQLiteStore) GetSecret(ctx context.Context, key, scope, scopeID string)
 
 	if target.Valid {
 		secret.Target = target.String
+	}
+	if secretRef.Valid {
+		secret.SecretRef = secretRef.String
 	}
 
 	return secret, nil
@@ -2257,10 +2268,11 @@ func (s *SQLiteStore) UpdateSecret(ctx context.Context, secret *store.Secret) er
 
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE secrets SET
-			encrypted_value = ?, secret_type = ?, target = ?, description = ?, version = ?, updated_at = ?, updated_by = ?
+			encrypted_value = ?, secret_ref = ?, secret_type = ?, target = ?, description = ?, version = ?, updated_at = ?, updated_by = ?
 		WHERE key = ? AND scope = ? AND scope_id = ?
 	`,
-		secret.EncryptedValue, secret.SecretType, nullableString(secret.Target),
+		secret.EncryptedValue, nullableString(secret.SecretRef),
+		secret.SecretType, nullableString(secret.Target),
 		secret.Description, secret.Version, secret.Updated, secret.UpdatedBy,
 		secret.Key, secret.Scope, secret.ScopeID,
 	)
@@ -2351,7 +2363,7 @@ func (s *SQLiteStore) ListSecrets(ctx context.Context, filter store.SecretFilter
 
 	// Note: We do NOT select encrypted_value for listing
 	query := fmt.Sprintf(`
-		SELECT id, key, secret_type, COALESCE(target, key), scope, scope_id, description, version, created_at, updated_at, created_by, updated_by
+		SELECT id, key, secret_ref, secret_type, COALESCE(target, key), scope, scope_id, description, version, created_at, updated_at, created_by, updated_by
 		FROM secrets %s ORDER BY key
 	`, whereClause)
 
@@ -2365,8 +2377,9 @@ func (s *SQLiteStore) ListSecrets(ctx context.Context, filter store.SecretFilter
 	for rows.Next() {
 		var secret store.Secret
 		var target sql.NullString
+		var secretRef sql.NullString
 		if err := rows.Scan(
-			&secret.ID, &secret.Key, &secret.SecretType, &target,
+			&secret.ID, &secret.Key, &secretRef, &secret.SecretType, &target,
 			&secret.Scope, &secret.ScopeID,
 			&secret.Description, &secret.Version,
 			&secret.Created, &secret.Updated, &secret.CreatedBy, &secret.UpdatedBy,
@@ -2375,6 +2388,9 @@ func (s *SQLiteStore) ListSecrets(ctx context.Context, filter store.SecretFilter
 		}
 		if target.Valid {
 			secret.Target = target.String
+		}
+		if secretRef.Valid {
+			secret.SecretRef = secretRef.String
 		}
 		secrets = append(secrets, secret)
 	}

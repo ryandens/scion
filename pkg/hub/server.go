@@ -28,6 +28,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ptone/scion-agent/pkg/secret"
 	"github.com/ptone/scion-agent/pkg/storage"
 	"github.com/ptone/scion-agent/pkg/store"
 	"github.com/ptone/scion-agent/pkg/util/logging"
@@ -251,6 +252,7 @@ type Server struct {
 	startTime         time.Time
 	dispatcher        AgentDispatcher     // Optional dispatcher for co-located runtime broker
 	storage           storage.Storage     // Optional storage backend for templates
+	secretBackend     secret.SecretBackend // Optional secret backend
 	agentTokenService *AgentTokenService  // Agent JWT token service
 	userTokenService  *UserTokenService   // User JWT token service
 	apiKeyService     *APIKeyService      // API key service
@@ -449,6 +451,20 @@ func (s *Server) GetStorage() storage.Storage {
 	return s.storage
 }
 
+// SetSecretBackend sets the secret backend for pluggable secret storage.
+func (s *Server) SetSecretBackend(b secret.SecretBackend) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.secretBackend = b
+}
+
+// GetSecretBackend returns the current secret backend.
+func (s *Server) GetSecretBackend() secret.SecretBackend {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.secretBackend
+}
+
 // GetAgentTokenService returns the agent token service.
 func (s *Server) GetAgentTokenService() *AgentTokenService {
 	s.mu.RLock()
@@ -546,6 +562,11 @@ func (s *Server) CreateAuthenticatedDispatcher() *HTTPAgentDispatcher {
 	} else if s.config.Debug {
 		slog.Warn("No hub.endpoint configured - agents won't know how to reach Hub")
 		slog.Info("Configure via: hub.endpoint in server.yaml or SCION_SERVER_HUB_ENDPOINT env var")
+	}
+
+	// Pass secret backend to dispatcher if configured
+	if s.secretBackend != nil {
+		dispatcher.SetSecretBackend(s.secretBackend)
 	}
 
 	return dispatcher

@@ -20,6 +20,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/ptone/scion-agent/pkg/secret"
 	"github.com/ptone/scion-agent/pkg/store"
 )
 
@@ -151,6 +152,84 @@ func TestResolveSecrets(t *testing.T) {
 	// Total count: API_KEY, DB_PASS, TLS_CERT, CONFIG = 4
 	if len(resolved) != 4 {
 		t.Errorf("expected 4 resolved secrets, got %d", len(resolved))
+	}
+}
+
+func TestResolveSecrets_WithBackend(t *testing.T) {
+	memStore := createTestStore(t)
+	ctx := context.Background()
+
+	// Set up secrets via the backend
+	backend := secret.NewLocalBackend(memStore)
+
+	_, _, _ = backend.Set(ctx, &secret.SetSecretInput{
+		Name:       "API_KEY",
+		Value:      "user-api-key",
+		SecretType: secret.TypeEnvironment,
+		Scope:      secret.ScopeUser,
+		ScopeID:    "user-1",
+	})
+	_, _, _ = backend.Set(ctx, &secret.SetSecretInput{
+		Name:       "API_KEY",
+		Value:      "grove-api-key",
+		SecretType: secret.TypeEnvironment,
+		Scope:      secret.ScopeGrove,
+		ScopeID:    "grove-1",
+	})
+	_, _, _ = backend.Set(ctx, &secret.SetSecretInput{
+		Name:       "DB_PASS",
+		Value:      "db-password",
+		SecretType: secret.TypeEnvironment,
+		Target:     "DATABASE_PASSWORD",
+		Scope:      secret.ScopeGrove,
+		ScopeID:    "grove-1",
+	})
+
+	// Create dispatcher with backend
+	mockClient := &mockRuntimeBrokerClient{}
+	dispatcher := NewHTTPAgentDispatcherWithClient(memStore, mockClient, false)
+	dispatcher.SetSecretBackend(backend)
+
+	agent := &store.Agent{
+		ID:      "agent-1",
+		Name:    "test-agent",
+		OwnerID: "user-1",
+		GroveID: "grove-1",
+	}
+
+	resolved, err := dispatcher.resolveSecrets(ctx, agent)
+	if err != nil {
+		t.Fatalf("resolveSecrets with backend failed: %v", err)
+	}
+
+	byName := make(map[string]ResolvedSecret)
+	for _, rs := range resolved {
+		byName[rs.Name] = rs
+	}
+
+	// API_KEY should be overridden by grove scope
+	apiKey, ok := byName["API_KEY"]
+	if !ok {
+		t.Fatal("expected API_KEY in resolved secrets")
+	}
+	if apiKey.Value != "grove-api-key" {
+		t.Errorf("expected API_KEY value %q, got %q", "grove-api-key", apiKey.Value)
+	}
+	if apiKey.Source != store.ScopeGrove {
+		t.Errorf("expected API_KEY source %q, got %q", store.ScopeGrove, apiKey.Source)
+	}
+
+	// DB_PASS target should be preserved
+	dbPass, ok := byName["DB_PASS"]
+	if !ok {
+		t.Fatal("expected DB_PASS in resolved secrets")
+	}
+	if dbPass.Target != "DATABASE_PASSWORD" {
+		t.Errorf("expected DB_PASS target %q, got %q", "DATABASE_PASSWORD", dbPass.Target)
+	}
+
+	if len(resolved) != 2 {
+		t.Errorf("expected 2 resolved secrets, got %d", len(resolved))
 	}
 }
 

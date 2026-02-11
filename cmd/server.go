@@ -40,6 +40,7 @@ import (
 	"github.com/ptone/scion-agent/pkg/hub"
 	"github.com/ptone/scion-agent/pkg/runtime"
 	"github.com/ptone/scion-agent/pkg/runtimebroker"
+	"github.com/ptone/scion-agent/pkg/secret"
 	"github.com/ptone/scion-agent/pkg/storage"
 	"github.com/ptone/scion-agent/pkg/store"
 	"github.com/ptone/scion-agent/pkg/store/sqlite"
@@ -470,6 +471,17 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 			hubSrv.SetStorage(stor)
 			log.Printf("Local storage configured: %s", storageDir)
 		}
+
+		// Initialize secret backend
+		secretBackend, err := secret.NewBackend(ctx, cfg.Secrets.Backend, s, secret.GCPBackendConfig{
+			ProjectID:       cfg.Secrets.GCPProjectID,
+			CredentialsJSON: cfg.Secrets.GCPCredentials,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to initialize secret backend: %w", err)
+		}
+		hubSrv.SetSecretBackend(secretBackend)
+		log.Printf("Secret backend configured: %s", cfg.Secrets.Backend)
 
 		log.Printf("Starting Hub API server on %s:%d", cfg.Hub.Host, cfg.Hub.Port)
 		log.Printf("Database: %s (%s)", cfg.Database.Driver, cfg.Database.URL)

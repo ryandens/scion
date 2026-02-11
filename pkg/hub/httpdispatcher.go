@@ -27,6 +27,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ptone/scion-agent/pkg/secret"
 	"github.com/ptone/scion-agent/pkg/store"
 )
 
@@ -303,6 +304,7 @@ type HTTPAgentDispatcher struct {
 	store          store.Store
 	client         RuntimeBrokerClient
 	tokenGenerator AgentTokenGenerator
+	secretBackend  secret.SecretBackend
 	hubEndpoint    string // Hub endpoint URL for agents to call back
 	debug          bool
 }
@@ -333,6 +335,11 @@ func (d *HTTPAgentDispatcher) SetTokenGenerator(gen AgentTokenGenerator) {
 // SetHubEndpoint sets the Hub endpoint URL that agents will use to call back.
 func (d *HTTPAgentDispatcher) SetHubEndpoint(endpoint string) {
 	d.hubEndpoint = endpoint
+}
+
+// SetSecretBackend sets the secret backend for resolving secrets.
+func (d *HTTPAgentDispatcher) SetSecretBackend(b secret.SecretBackend) {
+	d.secretBackend = b
 }
 
 // getBrokerEndpoint retrieves the endpoint URL for a runtime broker.
@@ -570,7 +577,26 @@ func (d *HTTPAgentDispatcher) DispatchCheckAgentPrompt(ctx context.Context, agen
 // resolveSecrets queries secrets from all applicable scopes and merges them
 // into a flat list. Higher scopes override lower: user < grove < runtime_broker.
 func (d *HTTPAgentDispatcher) resolveSecrets(ctx context.Context, agent *store.Agent) ([]ResolvedSecret, error) {
-	// Map keyed by secret Key; later scopes override earlier ones
+	// Delegate to secret backend if configured
+	if d.secretBackend != nil {
+		resolved, err := d.secretBackend.Resolve(ctx, agent.OwnerID, agent.GroveID, agent.RuntimeBrokerID)
+		if err != nil {
+			return nil, err
+		}
+		result := make([]ResolvedSecret, len(resolved))
+		for i, sv := range resolved {
+			result[i] = ResolvedSecret{
+				Name:   sv.Name,
+				Type:   sv.SecretType,
+				Target: sv.Target,
+				Value:  sv.Value,
+				Source: sv.Scope,
+			}
+		}
+		return result, nil
+	}
+
+	// Fallback: direct store access (legacy code path)
 	merged := make(map[string]ResolvedSecret)
 
 	// Scope resolution order: user (lowest), grove, runtime_broker (highest)
@@ -599,26 +625,26 @@ func (d *HTTPAgentDispatcher) resolveSecrets(ctx context.Context, agent *store.A
 			return nil, fmt.Errorf("failed to list secrets for scope %s/%s: %w", s.scope, s.scopeID, err)
 		}
 
-		for _, secret := range secrets {
-			value, err := d.store.GetSecretValue(ctx, secret.Key, s.scope, s.scopeID)
+		for _, sec := range secrets {
+			value, err := d.store.GetSecretValue(ctx, sec.Key, s.scope, s.scopeID)
 			if err != nil {
 				if d.debug {
-					slog.Warn("Failed to get secret value", "key", secret.Key, "scope", s.scope, "error", err)
+					slog.Warn("Failed to get secret value", "key", sec.Key, "scope", s.scope, "error", err)
 				}
 				continue
 			}
 
-			secretType := secret.SecretType
+			secretType := sec.SecretType
 			if secretType == "" {
 				secretType = store.SecretTypeEnvironment
 			}
-			target := secret.Target
+			target := sec.Target
 			if target == "" {
-				target = secret.Key
+				target = sec.Key
 			}
 
-			merged[secret.Key] = ResolvedSecret{
-				Name:   secret.Key,
+			merged[sec.Key] = ResolvedSecret{
+				Name:   sec.Key,
 				Type:   secretType,
 				Target: target,
 				Value:  value,

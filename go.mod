@@ -4,6 +4,7 @@ go 1.25.4
 
 require (
 	cloud.google.com/go/logging v1.13.2
+	cloud.google.com/go/secretmanager v1.16.0
 	cloud.google.com/go/storage v1.59.1
 	github.com/creack/pty v1.1.24
 	github.com/dustin/go-humanize v1.0.1

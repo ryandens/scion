@@ -1,0 +1,400 @@
+// Copyright 2026 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//go:build !no_sqlite
+
+package secret
+
+import (
+	"context"
+	"fmt"
+	"sync"
+	"testing"
+
+	smpb "cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
+	"github.com/ptone/scion-agent/pkg/store"
+	"github.com/ptone/scion-agent/pkg/store/sqlite"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+)
+
+// mockSMClient implements SMClient for testing.
+type mockSMClient struct {
+	mu       sync.Mutex
+	secrets  map[string]*smpb.Secret            // keyed by full name
+	versions map[string][]byte                   // keyed by full name, latest value
+	closed   bool
+}
+
+func newMockSMClient() *mockSMClient {
+	return &mockSMClient{
+		secrets:  make(map[string]*smpb.Secret),
+		versions: make(map[string][]byte),
+	}
+}
+
+func (m *mockSMClient) CreateSecret(_ context.Context, req *smpb.CreateSecretRequest) (*smpb.Secret, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	fullName := fmt.Sprintf("%s/secrets/%s", req.Parent, req.SecretId)
+	if _, exists := m.secrets[fullName]; exists {
+		return nil, status.Errorf(codes.AlreadyExists, "secret %s already exists", fullName)
+	}
+
+	sec := &smpb.Secret{
+		Name:        fullName,
+		Replication: req.Secret.Replication,
+		Labels:      req.Secret.Labels,
+	}
+	m.secrets[fullName] = sec
+	return sec, nil
+}
+
+func (m *mockSMClient) AddSecretVersion(_ context.Context, req *smpb.AddSecretVersionRequest) (*smpb.SecretVersion, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if _, exists := m.secrets[req.Parent]; !exists {
+		return nil, status.Errorf(codes.NotFound, "secret %s not found", req.Parent)
+	}
+
+	m.versions[req.Parent] = req.Payload.Data
+	return &smpb.SecretVersion{
+		Name: req.Parent + "/versions/1",
+	}, nil
+}
+
+func (m *mockSMClient) AccessSecretVersion(_ context.Context, req *smpb.AccessSecretVersionRequest) (*smpb.AccessSecretVersionResponse, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Strip /versions/latest suffix to find the parent secret
+	name := req.Name
+	for _, suffix := range []string{"/versions/latest", "/versions/1"} {
+		if len(name) > len(suffix) && name[len(name)-len(suffix):] == suffix {
+			name = name[:len(name)-len(suffix)]
+			break
+		}
+	}
+
+	data, exists := m.versions[name]
+	if !exists {
+		return nil, status.Errorf(codes.NotFound, "secret version not found for %s", req.Name)
+	}
+
+	return &smpb.AccessSecretVersionResponse{
+		Name: req.Name,
+		Payload: &smpb.SecretPayload{
+			Data: data,
+		},
+	}, nil
+}
+
+func (m *mockSMClient) DeleteSecret(_ context.Context, req *smpb.DeleteSecretRequest) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if _, exists := m.secrets[req.Name]; !exists {
+		return status.Errorf(codes.NotFound, "secret %s not found", req.Name)
+	}
+
+	delete(m.secrets, req.Name)
+	delete(m.versions, req.Name)
+	return nil
+}
+
+func (m *mockSMClient) GetSecret(_ context.Context, req *smpb.GetSecretRequest) (*smpb.Secret, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	sec, exists := m.secrets[req.Name]
+	if !exists {
+		return nil, status.Errorf(codes.NotFound, "secret %s not found", req.Name)
+	}
+	return sec, nil
+}
+
+func (m *mockSMClient) Close() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.closed = true
+	return nil
+}
+
+func createTestGCPBackend(t *testing.T) (*GCPBackend, *mockSMClient) {
+	t.Helper()
+	s, err := sqlite.New(":memory:")
+	if err != nil {
+		t.Fatalf("failed to create test store: %v", err)
+	}
+	if err := s.Migrate(context.Background()); err != nil {
+		t.Fatalf("failed to migrate test store: %v", err)
+	}
+	mock := newMockSMClient()
+	backend := NewGCPBackendWithClient(s, mock, "test-project")
+	return backend, mock
+}
+
+func TestGCPBackend_SetAndGet(t *testing.T) {
+	backend, mock := createTestGCPBackend(t)
+	ctx := context.Background()
+
+	input := &SetSecretInput{
+		Name:        "API_KEY",
+		Value:       "sk-test-123",
+		SecretType:  TypeEnvironment,
+		Target:      "API_KEY",
+		Scope:       ScopeUser,
+		ScopeID:     "user-1",
+		Description: "Test API key",
+	}
+
+	created, meta, err := backend.Set(ctx, input)
+	if err != nil {
+		t.Fatalf("Set failed: %v", err)
+	}
+	if !created {
+		t.Error("expected created=true for new secret")
+	}
+	if meta.Name != "API_KEY" {
+		t.Errorf("expected name %q, got %q", "API_KEY", meta.Name)
+	}
+
+	// Verify value was stored in mock SM, not in DB
+	mock.mu.Lock()
+	if len(mock.versions) != 1 {
+		t.Errorf("expected 1 version in mock SM, got %d", len(mock.versions))
+	}
+	mock.mu.Unlock()
+
+	// Get it back
+	sv, err := backend.Get(ctx, "API_KEY", ScopeUser, "user-1")
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	if sv.Value != "sk-test-123" {
+		t.Errorf("expected value %q, got %q", "sk-test-123", sv.Value)
+	}
+	if sv.SecretType != TypeEnvironment {
+		t.Errorf("expected type %q, got %q", TypeEnvironment, sv.SecretType)
+	}
+}
+
+func TestGCPBackend_SetUpdate(t *testing.T) {
+	backend, _ := createTestGCPBackend(t)
+	ctx := context.Background()
+
+	input := &SetSecretInput{
+		Name:       "API_KEY",
+		Value:      "old-value",
+		SecretType: TypeEnvironment,
+		Scope:      ScopeUser,
+		ScopeID:    "user-1",
+	}
+
+	_, _, err := backend.Set(ctx, input)
+	if err != nil {
+		t.Fatalf("Set failed: %v", err)
+	}
+
+	// Update
+	input.Value = "new-value"
+	created, _, err := backend.Set(ctx, input)
+	if err != nil {
+		t.Fatalf("Set update failed: %v", err)
+	}
+	if created {
+		t.Error("expected created=false for update")
+	}
+
+	sv, err := backend.Get(ctx, "API_KEY", ScopeUser, "user-1")
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	if sv.Value != "new-value" {
+		t.Errorf("expected value %q, got %q", "new-value", sv.Value)
+	}
+}
+
+func TestGCPBackend_Delete(t *testing.T) {
+	backend, mock := createTestGCPBackend(t)
+	ctx := context.Background()
+
+	input := &SetSecretInput{
+		Name:       "TO_DELETE",
+		Value:      "value",
+		SecretType: TypeEnvironment,
+		Scope:      ScopeUser,
+		ScopeID:    "user-1",
+	}
+
+	_, _, err := backend.Set(ctx, input)
+	if err != nil {
+		t.Fatalf("Set failed: %v", err)
+	}
+
+	if err := backend.Delete(ctx, "TO_DELETE", ScopeUser, "user-1"); err != nil {
+		t.Fatalf("Delete failed: %v", err)
+	}
+
+	// Verify removed from both mock SM and DB
+	mock.mu.Lock()
+	if len(mock.secrets) != 0 {
+		t.Errorf("expected 0 secrets in mock SM, got %d", len(mock.secrets))
+	}
+	mock.mu.Unlock()
+
+	_, err = backend.Get(ctx, "TO_DELETE", ScopeUser, "user-1")
+	if err != store.ErrNotFound {
+		t.Errorf("expected ErrNotFound after delete, got %v", err)
+	}
+}
+
+func TestGCPBackend_List(t *testing.T) {
+	backend, _ := createTestGCPBackend(t)
+	ctx := context.Background()
+
+	for _, name := range []string{"A_KEY", "B_KEY", "C_KEY"} {
+		_, _, err := backend.Set(ctx, &SetSecretInput{
+			Name:       name,
+			Value:      "val-" + name,
+			SecretType: TypeEnvironment,
+			Scope:      ScopeUser,
+			ScopeID:    "user-1",
+		})
+		if err != nil {
+			t.Fatalf("Set %s failed: %v", name, err)
+		}
+	}
+
+	metas, err := backend.List(ctx, Filter{Scope: ScopeUser, ScopeID: "user-1"})
+	if err != nil {
+		t.Fatalf("List failed: %v", err)
+	}
+	if len(metas) != 3 {
+		t.Errorf("expected 3 secrets, got %d", len(metas))
+	}
+}
+
+func TestGCPBackend_GetMeta(t *testing.T) {
+	backend, _ := createTestGCPBackend(t)
+	ctx := context.Background()
+
+	_, _, err := backend.Set(ctx, &SetSecretInput{
+		Name:        "META_KEY",
+		Value:       "secret-value",
+		SecretType:  TypeVariable,
+		Target:      "config",
+		Scope:       ScopeGrove,
+		ScopeID:     "grove-1",
+		Description: "Test meta",
+	})
+	if err != nil {
+		t.Fatalf("Set failed: %v", err)
+	}
+
+	meta, err := backend.GetMeta(ctx, "META_KEY", ScopeGrove, "grove-1")
+	if err != nil {
+		t.Fatalf("GetMeta failed: %v", err)
+	}
+	if meta.Name != "META_KEY" {
+		t.Errorf("expected name %q, got %q", "META_KEY", meta.Name)
+	}
+	if meta.SecretType != TypeVariable {
+		t.Errorf("expected type %q, got %q", TypeVariable, meta.SecretType)
+	}
+}
+
+func TestGCPBackend_Resolve(t *testing.T) {
+	backend, _ := createTestGCPBackend(t)
+	ctx := context.Background()
+
+	// User-level secret
+	_, _, _ = backend.Set(ctx, &SetSecretInput{
+		Name:       "API_KEY",
+		Value:      "user-api-key",
+		SecretType: TypeEnvironment,
+		Scope:      ScopeUser,
+		ScopeID:    "user-1",
+	})
+
+	// Grove-level override
+	_, _, _ = backend.Set(ctx, &SetSecretInput{
+		Name:       "API_KEY",
+		Value:      "grove-api-key",
+		SecretType: TypeEnvironment,
+		Scope:      ScopeGrove,
+		ScopeID:    "grove-1",
+	})
+
+	// Grove-only secret
+	_, _, _ = backend.Set(ctx, &SetSecretInput{
+		Name:       "DB_PASS",
+		Value:      "db-password",
+		SecretType: TypeEnvironment,
+		Target:     "DATABASE_PASSWORD",
+		Scope:      ScopeGrove,
+		ScopeID:    "grove-1",
+	})
+
+	resolved, err := backend.Resolve(ctx, "user-1", "grove-1", "")
+	if err != nil {
+		t.Fatalf("Resolve failed: %v", err)
+	}
+
+	byName := make(map[string]SecretWithValue)
+	for _, sv := range resolved {
+		byName[sv.Name] = sv
+	}
+
+	// API_KEY overridden by grove
+	apiKey, ok := byName["API_KEY"]
+	if !ok {
+		t.Fatal("expected API_KEY in resolved secrets")
+	}
+	if apiKey.Value != "grove-api-key" {
+		t.Errorf("expected grove API_KEY value %q, got %q", "grove-api-key", apiKey.Value)
+	}
+
+	// DB_PASS from grove
+	dbPass, ok := byName["DB_PASS"]
+	if !ok {
+		t.Fatal("expected DB_PASS in resolved secrets")
+	}
+	if dbPass.Value != "db-password" {
+		t.Errorf("expected DB_PASS value %q, got %q", "db-password", dbPass.Value)
+	}
+
+	if len(resolved) != 2 {
+		t.Errorf("expected 2 resolved secrets, got %d", len(resolved))
+	}
+}
+
+func TestGCPBackend_SecretNameSanitization(t *testing.T) {
+	backend, _ := createTestGCPBackend(t)
+
+	// Test the naming convention
+	name := backend.gcpSecretName("MY_KEY", "user", "user-123")
+	if name != "scion-user-user-123-MY_KEY" {
+		t.Errorf("unexpected secret name: %s", name)
+	}
+
+	// Test sanitization of special characters
+	name = backend.gcpSecretName("my.key/with spaces", "grove", "grove@id")
+	expected := "scion-grove-grove-id-my-key-with-spaces"
+	if name != expected {
+		t.Errorf("expected sanitized name %q, got %q", expected, name)
+	}
+}

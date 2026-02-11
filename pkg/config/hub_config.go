@@ -146,9 +146,22 @@ type GlobalConfig struct {
 	// Storage settings
 	Storage StorageConfig `json:"storage" yaml:"storage" koanf:"storage"`
 
+	// Secrets backend settings
+	Secrets SecretsConfig `json:"secrets" yaml:"secrets" koanf:"secrets"`
+
 	// Logging settings
 	LogLevel  string `json:"logLevel" yaml:"logLevel" koanf:"logLevel"`
 	LogFormat string `json:"logFormat" yaml:"logFormat" koanf:"logFormat"` // text, json
+}
+
+// SecretsConfig holds configuration for the secrets backend.
+type SecretsConfig struct {
+	// Backend selects the secret storage backend: "local" (default) or "gcpsm".
+	Backend string `json:"backend" yaml:"backend" koanf:"backend"`
+	// GCPProjectID is the GCP project ID for the GCP Secret Manager backend.
+	GCPProjectID string `json:"gcpProjectId" yaml:"gcpProjectId" koanf:"gcpProjectId"`
+	// GCPCredentials is the path to GCP credentials JSON or the JSON itself.
+	GCPCredentials string `json:"gcpCredentials" yaml:"gcpCredentials" koanf:"gcpCredentials"`
 }
 
 // StorageConfig holds storage settings.
@@ -196,6 +209,9 @@ func DefaultGlobalConfig() GlobalConfig {
 		},
 		Storage: StorageConfig{
 			Provider: "local",
+		},
+		Secrets: SecretsConfig{
+			Backend: "local",
 		},
 		LogLevel:  "info",
 		LogFormat: "text",
@@ -256,8 +272,12 @@ func LoadGlobalConfig(configPath string) (*GlobalConfig, error) {
 		"storage.provider":  defaults.Storage.Provider,
 		"storage.bucket":    defaults.Storage.Bucket,
 		"storage.localPath": defaults.Storage.LocalPath,
-		"logLevel":          defaults.LogLevel,
-		"logFormat":         defaults.LogFormat,
+		// Secrets backend defaults
+		"secrets.backend":        defaults.Secrets.Backend,
+		"secrets.gcpProjectId":   defaults.Secrets.GCPProjectID,
+		"secrets.gcpCredentials": defaults.Secrets.GCPCredentials,
+		"logLevel":               defaults.LogLevel,
+		"logFormat":              defaults.LogFormat,
 	}, "."), nil); err != nil {
 		return nil, err
 	}

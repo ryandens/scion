@@ -444,6 +444,9 @@ type Secret struct {
 	// Value (stored encrypted, never returned in API responses)
 	EncryptedValue string `json:"-"` // Encrypted value (never serialized)
 
+	// External reference (e.g., "gcpsm:projects/123/secrets/name" for GCP SM backend)
+	SecretRef string `json:"secretRef,omitempty"` // External secret reference
+
 	// Type and Target
 	SecretType string `json:"type"`             // environment, variable, file (default: environment)
 	Target     string `json:"target,omitempty"` // Projection target: env var name, json key, or file path

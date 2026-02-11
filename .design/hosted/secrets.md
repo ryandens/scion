@@ -777,9 +777,9 @@ File-type secrets are limited to **64 KiB** to match GCP Secret Manager's per-ve
 
 ### 8.3 Phase 3: GCP Secret Manager Backend
 
-1. Implement `secret.SecretBackend` using hybrid storage (Hub DB metadata + GCP SM values).
-2. Configuration to select backend (SQLite-encrypted vs hybrid GCP SM).
-3. Migration tooling to move existing secrets from SQLite to GCP SM.
+1. ~~Implement `secret.SecretBackend` using hybrid storage (Hub DB metadata + GCP SM values).~~ Done (`pkg/secret/` package with `SecretBackend` interface, `LocalBackend`, and `GCPBackend`).
+2. ~~Configuration to select backend (SQLite-encrypted vs hybrid GCP SM).~~ Done (`SecretsConfig` in `pkg/config/hub_config.go`, env vars `SCION_SERVER_SECRETS_*`).
+3. ~~Migration tooling to move existing secrets from SQLite to GCP SM.~~ Done (`scion hub secret migrate` command with `--project`, `--credentials`, `--dry-run` flags).
 
 ### 8.4 Phase 4: Native K8s/Cloud Run Integration
 
