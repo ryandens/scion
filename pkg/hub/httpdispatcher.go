@@ -465,7 +465,7 @@ func (d *HTTPAgentDispatcher) buildCreateRequest(ctx context.Context, agent *sto
 	// Add configuration if available
 	if agent.AppliedConfig != nil {
 		req.Config = &RemoteAgentConfig{
-			Template:     agent.AppliedConfig.Harness,
+			Template:     agent.Template,
 			Image:        agent.AppliedConfig.Image,
 			Task:         agent.AppliedConfig.Task,
 			Workspace:    agent.AppliedConfig.Workspace,
