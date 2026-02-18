@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"time"
 )
 
 var (
@@ -52,10 +53,11 @@ func DebugEnabled() bool {
 }
 
 // Debugf prints a debug message to stderr if debug mode is enabled.
-// The message is prefixed with [DEBUG].
+// The message is prefixed with a timestamp and [DEBUG].
 func Debugf(format string, args ...interface{}) {
 	if DebugEnabled() {
-		fmt.Fprintf(os.Stderr, "[DEBUG] "+format+"\n", args...)
+		ts := time.Now().Format("15:04:05.000")
+		fmt.Fprintf(os.Stderr, ts+" [DEBUG] "+format+"\n", args...)
 	}
 }
 

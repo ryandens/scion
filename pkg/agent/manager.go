@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/ptone/scion-agent/pkg/api"
 	"github.com/ptone/scion-agent/pkg/harness"
@@ -68,7 +69,10 @@ func (m *AgentManager) Stop(ctx context.Context, agentID string) error {
 func (m *AgentManager) Delete(ctx context.Context, agentID string, deleteFiles bool, grovePath string, removeBranch bool) (bool, error) {
 	// 1. Check if container exists
 	// We use name filter if possible, but runtime.List might take map[string]string
+	util.Debugf("delete: listing containers in mgr.Delete for %s", agentID)
+	listStart := time.Now()
 	agents, err := m.Runtime.List(ctx, map[string]string{"scion.name": agentID})
+	util.Debugf("delete: mgr.Delete container list completed in %v", time.Since(listStart))
 	containerExists := false
 	var targetID string
 	if err == nil {

@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"io"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -104,9 +105,13 @@ func TestDebugf(t *testing.T) {
 	io.Copy(&buf, r)
 	os.Stderr = oldStderr
 
-	expected := "[DEBUG] test message 42\n"
-	if buf.String() != expected {
-		t.Errorf("Debugf output = %q, want %q", buf.String(), expected)
+	output := buf.String()
+	if !strings.HasSuffix(output, " [DEBUG] test message 42\n") {
+		t.Errorf("Debugf output = %q, want suffix %q", output, " [DEBUG] test message 42\n")
+	}
+	// Verify timestamp prefix format (HH:MM:SS.mmm)
+	if len(output) < 13 || output[2] != ':' || output[5] != ':' || output[8] != '.' {
+		t.Errorf("Debugf output missing timestamp prefix, got: %q", output)
 	}
 
 	// Cleanup

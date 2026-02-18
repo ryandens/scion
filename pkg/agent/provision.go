@@ -56,7 +56,10 @@ func DeleteAgentFiles(agentName string, grovePath string, removeBranch bool) (bo
 
 	for _, dir := range agentsDirs {
 		// Clean up tombstones from previous async deletions.
+		util.Debugf("delete: cleaning up pending deletions in %s", dir)
+		cleanupStart := time.Now()
 		util.CleanupPendingDeletions(dir)
+		util.Debugf("delete: pending deletion cleanup completed in %v", time.Since(cleanupStart))
 
 		agentDir := filepath.Join(dir, agentName)
 		if _, err := os.Stat(agentDir); err != nil {

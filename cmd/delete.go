@@ -258,7 +258,10 @@ func deleteAgentLocal(agentName string) error {
 	fmt.Printf("Deleting agent '%s'...\n", agentName)
 
 	// We check if it exists in List to provide better feedback
+	util.Debugf("delete: listing containers for %s", agentName)
+	listStart := time.Now()
 	agents, _ := mgr.List(context.Background(), map[string]string{"scion.name": agentName})
+	util.Debugf("delete: container list completed in %v", time.Since(listStart))
 	containerFound := false
 	for _, a := range agents {
 		if a.Name == agentName || a.ID == agentName || strings.TrimPrefix(a.Name, "/") == agentName {
