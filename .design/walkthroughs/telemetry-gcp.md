@@ -30,7 +30,7 @@ implementation.
 export GCP_PROJECT="your-project-id"
 
 gcloud services enable cloudtrace.googleapis.com \
-  cloudmonitoring.googleapis.com \
+  monitoring.googleapis.com \
   --project "$GCP_PROJECT"
 ```
 
@@ -44,18 +44,19 @@ gcloud auth application-default login --project "$GCP_PROJECT"
 ```
 
 For CI or remote brokers, use a service account with the `roles/cloudtrace.agent`
-and `roles/monitoring.metricWriter` roles:
+and `roles/monitoring.metricWriter` roles (this matches the `scion-demo-sa`
+created by `hack/gce-demo-provision.sh`):
 
 ```bash
-gcloud iam service-accounts create scion-telemetry \
-  --display-name "Scion Telemetry Agent"
+gcloud iam service-accounts create scion-demo-sa \
+  --display-name "Scion Demo Service Account"
 
 gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
-  --member "serviceAccount:scion-telemetry@${GCP_PROJECT}.iam.gserviceaccount.com" \
+  --member "serviceAccount:scion-demo-sa@${GCP_PROJECT}.iam.gserviceaccount.com" \
   --role "roles/cloudtrace.agent"
 
 gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
-  --member "serviceAccount:scion-telemetry@${GCP_PROJECT}.iam.gserviceaccount.com" \
+  --member "serviceAccount:scion-demo-sa@${GCP_PROJECT}.iam.gserviceaccount.com" \
   --role "roles/monitoring.metricWriter"
 ```
 
