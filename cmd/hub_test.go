@@ -68,3 +68,28 @@ func TestGetAuthInfo_NilHub(t *testing.T) {
 	info := getAuthInfo(settings, "")
 	assert.Equal(t, "none", info.MethodType)
 }
+
+func TestParseDefaultBranch_ParsesSymref(t *testing.T) {
+	// Real output from `git ls-remote --symref <url> HEAD`
+	output := "ref: refs/heads/main\tHEAD\n5f3c6e72abc123def456 HEAD\n"
+	result := parseDefaultBranch(output)
+	assert.Equal(t, "main", result)
+}
+
+func TestParseDefaultBranch_NonMainBranch(t *testing.T) {
+	output := "ref: refs/heads/develop\tHEAD\nabc123 HEAD\n"
+	result := parseDefaultBranch(output)
+	assert.Equal(t, "develop", result)
+}
+
+func TestParseDefaultBranch_NoMatch(t *testing.T) {
+	// Output that doesn't contain the expected symref line
+	output := "abc123def456 HEAD\n"
+	result := parseDefaultBranch(output)
+	assert.Equal(t, "", result)
+}
+
+func TestParseDefaultBranch_EmptyOutput(t *testing.T) {
+	result := parseDefaultBranch("")
+	assert.Equal(t, "", result)
+}

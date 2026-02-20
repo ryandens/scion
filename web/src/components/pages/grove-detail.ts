@@ -428,6 +428,7 @@ export class ScionPageGroveDetail extends LitElement {
       case 'stopped':
         return 'neutral';
       case 'provisioning':
+      case 'cloning':
         return 'warning';
       case 'error':
         return 'danger';

@@ -75,6 +75,7 @@ type GroveInfo struct {
 // Agent status values matching the API specification.
 const (
 	AgentStatusCreated      = "created"
+	AgentStatusCloning      = "cloning"
 	AgentStatusPending      = "pending"
 	AgentStatusProvisioning = "provisioning"
 	AgentStatusStarting     = "starting"

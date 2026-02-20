@@ -105,6 +105,7 @@ type AgentAppliedConfig struct {
 // AgentStatus constants
 const (
 	AgentStatusCreated      = "created"
+	AgentStatusCloning      = "cloning"
 	AgentStatusProvisioning = "provisioning"
 	AgentStatusRunning      = "running"
 	AgentStatusStopped      = "stopped"

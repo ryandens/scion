@@ -76,6 +76,59 @@ Secrets are encrypted and never returned via the API; they are securely injected
 
 See the [Secret & Environment Management guide](/guides/secrets) for details on scoping and projection modes.
 
+## Git-Based Groves
+
+Instead of linking a local directory, you can create a grove directly from a git repository URL. This is useful for CI/CD workflows, remote-only development, or teams that want agents to work on repositories without requiring a local checkout.
+
+### Creating a Grove from a Git URL
+
+```bash
+scion hub grove create https://github.com/org/my-project.git
+```
+
+This registers the repository on the Hub, detects the default branch, and stores the clone URL as grove metadata. You can customize the grove with flags:
+
+```bash
+scion hub grove create https://github.com/org/my-project.git \
+  --name "My Project" \
+  --slug my-project \
+  --branch develop
+```
+
+### Setting Up Authentication
+
+For private repositories, set a `GITHUB_TOKEN` secret on the grove. The token needs at minimum **Contents: Read** permission.
+
+```bash
+scion hub secret set --grove GITHUB_TOKEN=ghp_xxxxxxxxxxxx
+```
+
+### Starting Agents
+
+Once the grove is created and the token is set, start agents as usual:
+
+```bash
+scion hub agent create --grove my-project --task "implement feature X"
+```
+
+The agent's container will clone the repository at startup, create a `scion/<agent-name>` branch, and begin working.
+
+### End-to-End Example
+
+```bash
+# 1. Create the grove from a git URL
+scion hub grove create https://github.com/acme/backend.git --name "Acme Backend"
+
+# 2. Set the GitHub token for private repo access
+scion hub secret set --grove GITHUB_TOKEN=ghp_xxxxxxxxxxxx
+
+# 3. Start an agent on the grove
+scion hub agent create --grove acme-backend --task "add user authentication"
+
+# 4. Monitor the agent
+scion hub agents --grove acme-backend
+```
+
 ## Collaboration
 
 - **Web Dashboard**: Use the Hub's web interface to view running agents, logs, and status.

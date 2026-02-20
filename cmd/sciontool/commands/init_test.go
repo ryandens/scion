@@ -248,3 +248,82 @@ func TestBuildAuthenticatedURL(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildAuthenticatedURL_SpecialCharsInToken(t *testing.T) {
+	tests := []struct {
+		name     string
+		token    string
+		contains string
+	}{
+		{
+			name:     "token with percent sign",
+			token:    "ghp_abc%def",
+			contains: "oauth2:ghp_abc%25def@",
+		},
+		{
+			name:     "token with at sign",
+			token:    "ghp_abc@def",
+			contains: "oauth2:ghp_abc%40def@",
+		},
+		{
+			name:     "token with hash sign",
+			token:    "ghp_abc#def",
+			contains: "oauth2:ghp_abc%23def@",
+		},
+		{
+			name:     "token with all special characters",
+			token:    "ghp_%@#tok",
+			contains: "oauth2:ghp_%25%40%23tok@",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := buildAuthenticatedURL("https://github.com/org/repo.git", tt.token)
+			if !strings.Contains(result, tt.contains) {
+				t.Errorf("expected result to contain %q, got %q", tt.contains, result)
+			}
+		})
+	}
+}
+
+func TestSanitizeGitOutput_LongToken(t *testing.T) {
+	// Fine-grained GitHub PATs are 93 characters long
+	longToken := "github_pat_" + strings.Repeat("A", 82) // 93 chars total
+	output := "fatal: Authentication failed for 'https://oauth2:" + longToken + "@github.com/org/repo.git/'"
+
+	result := sanitizeGitOutput(output, longToken)
+
+	if strings.Contains(result, longToken) {
+		t.Error("long token should be redacted from output")
+	}
+	if !strings.Contains(result, "***") {
+		t.Error("redacted token should be replaced with ***")
+	}
+	expected := "fatal: Authentication failed for 'https://oauth2:***@github.com/org/repo.git/'"
+	if result != expected {
+		t.Errorf("expected %q, got %q", expected, result)
+	}
+}
+
+func TestGitCloneWorkspace_DefaultEnvValues(t *testing.T) {
+	// Set SCION_GIT_CLONE_URL to trigger the clone path, but use a URL
+	// that will cause a predictable early failure (non-existent host).
+	// This tests that the env parsing logic runs with correct defaults.
+	t.Setenv("SCION_GIT_CLONE_URL", "https://nonexistent.invalid/org/repo.git")
+	// Explicitly unset branch and depth to verify defaults
+	t.Setenv("SCION_GIT_BRANCH", "")
+	t.Setenv("SCION_GIT_DEPTH", "")
+	t.Setenv("SCION_AGENT_NAME", "test-agent")
+	t.Setenv("GITHUB_TOKEN", "")
+
+	// gitCloneWorkspace will fail at the git clone step, but we can verify
+	// the function doesn't panic and returns a meaningful error.
+	err := gitCloneWorkspace()
+	if err == nil {
+		t.Fatal("expected error from git clone to nonexistent host")
+	}
+	if !strings.Contains(err.Error(), "git clone failed") {
+		t.Errorf("expected 'git clone failed' error, got: %v", err)
+	}
+}

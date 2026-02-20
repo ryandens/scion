@@ -1209,16 +1209,20 @@ func detectDefaultBranch(cloneURL string) string {
 	if err != nil {
 		return ""
 	}
+	return parseDefaultBranch(string(output))
+}
 
-	// Parse output for "ref: refs/heads/<branch>\tHEAD"
-	for _, line := range strings.Split(string(output), "\n") {
+// parseDefaultBranch extracts the default branch name from `git ls-remote --symref` output.
+// The expected format is: "ref: refs/heads/<branch>\tHEAD"
+// Returns the branch name or empty string if not found.
+func parseDefaultBranch(output string) string {
+	for _, line := range strings.Split(output, "\n") {
 		if strings.HasPrefix(line, "ref: refs/heads/") && strings.Contains(line, "\tHEAD") {
 			branch := strings.TrimPrefix(line, "ref: refs/heads/")
 			branch = strings.TrimSuffix(branch, "\tHEAD")
 			return strings.TrimSpace(branch)
 		}
 	}
-
 	return ""
 }
 

@@ -79,6 +79,46 @@ In non-git projects (where no `.git` directory is found):
 
 ---
 
+## 4. Git Groves (Hub-First Remote Workspaces)
+
+When working with a Scion Hub, groves can be created directly from a git repository URL. In this mode, the agent's container **clones the repository at startup** — no local checkout is needed on the host machine.
+
+```bash
+# Create a grove from a git URL
+scion hub grove create https://github.com/org/repo.git
+```
+
+### How It Works
+
+1. The Hub stores the git remote URL and default branch as grove metadata.
+2. When an agent starts, the Runtime Broker injects `SCION_GIT_CLONE_URL`, `SCION_GIT_BRANCH`, and `SCION_GIT_DEPTH` as environment variables.
+3. The `sciontool init` process inside the container clones the repo into `/workspace` before the harness starts.
+4. A feature branch `scion/<agent-name>` is created and checked out automatically.
+
+### Agent Branch Strategy
+
+Each agent gets its own branch named `scion/<agent-name>`. This prevents conflicts when multiple agents work on the same repository concurrently.
+
+### Shallow Clones
+
+By default, git groves use a shallow clone with `depth=1` for fast startup. If an agent needs full history (e.g., for `git log` or `git blame`), it can fetch the rest:
+
+```bash
+git fetch --unshallow
+```
+
+### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `SCION_GIT_CLONE_URL` | HTTPS URL of the repository to clone | *(required)* |
+| `SCION_GIT_BRANCH` | Branch to clone | `main` |
+| `SCION_GIT_DEPTH` | Clone depth | `1` |
+
+Authentication is handled via the `GITHUB_TOKEN` environment variable, which is injected from the grove's secrets.
+
+---
+
 ## The `cdw` Command
 
 Scion provides a helper command, `cdw` (Change Directory to Worktree), to quickly navigate to an agent's workspace on your host.

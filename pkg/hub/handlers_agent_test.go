@@ -1392,3 +1392,105 @@ func TestCreateGroveAgent_NonGitGroveNoGitClone(t *testing.T) {
 	assert.Nil(t, persisted.AppliedConfig.GitClone,
 		"GitClone should be nil for non-git-anchored grove")
 }
+
+func TestCreateAgent_GitGroveCloneURLFallback(t *testing.T) {
+	disp := &createAgentDispatcher{createStatus: store.AgentStatusRunning}
+	srv, s, _ := setupCreateAgentServer(t, disp)
+	ctx := context.Background()
+
+	// Create a grove with GitRemote but WITHOUT the scion.dev/clone-url label.
+	// The URL should be constructed from gitRemote as "https://<gitRemote>.git".
+	gitGrove := &store.Grove{
+		ID:        "grove-git-fallback-url",
+		Name:      "Git Grove Fallback URL",
+		Slug:      "git-grove-fallback-url",
+		GitRemote: "github.com/example/fallback-repo",
+		Labels: map[string]string{
+			"scion.dev/default-branch": "develop",
+		},
+		DefaultRuntimeBrokerID: "broker-create",
+	}
+	require.NoError(t, s.CreateGrove(ctx, gitGrove))
+
+	provider := &store.GroveProvider{
+		GroveID:    gitGrove.ID,
+		BrokerID:   "broker-create",
+		BrokerName: "Create Test Broker",
+		Status:     store.BrokerStatusOnline,
+	}
+	require.NoError(t, s.AddGroveProvider(ctx, provider))
+
+	rec := doRequest(t, srv, http.MethodPost, "/api/v1/agents", CreateAgentRequest{
+		Name:    "fallback-url-agent",
+		GroveID: gitGrove.ID,
+		Task:    "test fallback",
+	})
+
+	require.Equal(t, http.StatusCreated, rec.Code)
+
+	var resp CreateAgentResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.NotNil(t, resp.Agent)
+
+	persisted, err := s.GetAgent(ctx, resp.Agent.ID)
+	require.NoError(t, err)
+	require.NotNil(t, persisted.AppliedConfig, "AppliedConfig should be set")
+	require.NotNil(t, persisted.AppliedConfig.GitClone, "GitClone should be populated")
+
+	// clone-url label is missing, so URL should be constructed from GitRemote
+	assert.Equal(t, "https://github.com/example/fallback-repo.git", persisted.AppliedConfig.GitClone.URL,
+		"clone URL should be constructed from gitRemote when scion.dev/clone-url label is absent")
+	assert.Equal(t, "develop", persisted.AppliedConfig.GitClone.Branch)
+	assert.Equal(t, 1, persisted.AppliedConfig.GitClone.Depth)
+}
+
+func TestCreateAgent_GitGroveDefaultBranchFallback(t *testing.T) {
+	disp := &createAgentDispatcher{createStatus: store.AgentStatusRunning}
+	srv, s, _ := setupCreateAgentServer(t, disp)
+	ctx := context.Background()
+
+	// Create a grove with GitRemote and clone-url label but WITHOUT default-branch.
+	// The branch should default to "main".
+	gitGrove := &store.Grove{
+		ID:        "grove-git-fallback-branch",
+		Name:      "Git Grove Fallback Branch",
+		Slug:      "git-grove-fallback-branch",
+		GitRemote: "github.com/example/branch-repo",
+		Labels: map[string]string{
+			"scion.dev/clone-url": "https://github.com/example/branch-repo.git",
+		},
+		DefaultRuntimeBrokerID: "broker-create",
+	}
+	require.NoError(t, s.CreateGrove(ctx, gitGrove))
+
+	provider := &store.GroveProvider{
+		GroveID:    gitGrove.ID,
+		BrokerID:   "broker-create",
+		BrokerName: "Create Test Broker",
+		Status:     store.BrokerStatusOnline,
+	}
+	require.NoError(t, s.AddGroveProvider(ctx, provider))
+
+	rec := doRequest(t, srv, http.MethodPost, "/api/v1/agents", CreateAgentRequest{
+		Name:    "fallback-branch-agent",
+		GroveID: gitGrove.ID,
+		Task:    "test branch fallback",
+	})
+
+	require.Equal(t, http.StatusCreated, rec.Code)
+
+	var resp CreateAgentResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.NotNil(t, resp.Agent)
+
+	persisted, err := s.GetAgent(ctx, resp.Agent.ID)
+	require.NoError(t, err)
+	require.NotNil(t, persisted.AppliedConfig, "AppliedConfig should be set")
+	require.NotNil(t, persisted.AppliedConfig.GitClone, "GitClone should be populated")
+
+	assert.Equal(t, "https://github.com/example/branch-repo.git", persisted.AppliedConfig.GitClone.URL)
+	// default-branch label is missing, so branch should default to "main"
+	assert.Equal(t, "main", persisted.AppliedConfig.GitClone.Branch,
+		"branch should default to 'main' when scion.dev/default-branch label is absent")
+	assert.Equal(t, 1, persisted.AppliedConfig.GitClone.Depth)
+}

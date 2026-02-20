@@ -30,6 +30,7 @@ export type StatusType =
   | 'running'
   | 'stopped'
   | 'provisioning'
+  | 'cloning'
   | 'starting'
   | 'stopping'
   | 'error'
@@ -58,6 +59,7 @@ const STATUS_MAP: Record<StatusType, StatusConfig> = {
   running: { variant: 'success', icon: 'play-circle', pulse: false },
   stopped: { variant: 'neutral', icon: 'stop-circle', pulse: false },
   provisioning: { variant: 'warning', icon: 'hourglass-split', pulse: true },
+  cloning: { variant: 'warning', icon: 'arrow-down-circle', pulse: true },
   starting: { variant: 'warning', icon: 'arrow-repeat', pulse: true },
   stopping: { variant: 'warning', icon: 'arrow-repeat', pulse: true },
   error: { variant: 'danger', icon: 'exclamation-triangle', pulse: false },

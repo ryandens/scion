@@ -182,6 +182,8 @@ Manages connection to and interaction with a Scion Hub.
     - `set <key>=<value>`: Set a variable.
     - `get [key]`: Get variable values.
     - `clear <key>`: Remove a variable.
+- `scion hub grove create <git-url>`: Create a grove from a remote git repository.
+    - Flags: `--slug`, `--name`, `--branch`, `--visibility`, `--json`
 
 ## Infrastructure
 

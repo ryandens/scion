@@ -72,7 +72,7 @@ export interface Grove {
 /**
  * Agent status enumeration
  */
-export type AgentStatus = 'running' | 'stopped' | 'provisioning' | 'error';
+export type AgentStatus = 'running' | 'stopped' | 'provisioning' | 'cloning' | 'error';
 
 /**
  * Agent session status
