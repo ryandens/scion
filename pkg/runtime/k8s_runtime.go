@@ -416,18 +416,26 @@ func toStringInterfaceMap(m map[string]string) map[string]interface{} {
 func (r *KubernetesRuntime) cleanupAgentSecrets(ctx context.Context, namespace, agentName string) {
 	selector := fmt.Sprintf("scion.agent=%s", agentName)
 
-	// Delete K8s Secrets
-	_ = r.Client.Clientset.CoreV1().Secrets(namespace).DeleteCollection(ctx,
-		metav1.DeleteOptions{},
-		metav1.ListOptions{LabelSelector: selector},
-	)
+	// Delete K8s Secrets by listing then deleting individually
+	secretList, err := r.Client.Clientset.CoreV1().Secrets(namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: selector,
+	})
+	if err == nil {
+		for _, s := range secretList.Items {
+			_ = r.Client.Clientset.CoreV1().Secrets(namespace).Delete(ctx, s.Name, metav1.DeleteOptions{})
+		}
+	}
 
 	// Delete SecretProviderClasses if GKE mode
 	if r.GKEMode {
-		_ = r.Client.Dynamic().Resource(k8s.SecretProviderClassGVR).Namespace(namespace).DeleteCollection(ctx,
-			metav1.DeleteOptions{},
-			metav1.ListOptions{LabelSelector: selector},
-		)
+		spcList, err := r.Client.Dynamic().Resource(k8s.SecretProviderClassGVR).Namespace(namespace).List(ctx, metav1.ListOptions{
+			LabelSelector: selector,
+		})
+		if err == nil {
+			for _, spc := range spcList.Items {
+				_ = r.Client.Dynamic().Resource(k8s.SecretProviderClassGVR).Namespace(namespace).Delete(ctx, spc.GetName(), metav1.DeleteOptions{})
+			}
+		}
 	}
 }
 
