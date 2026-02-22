@@ -408,6 +408,12 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 		opts.Profile = req.Config.Profile
 	}
 
+	// Save template slug before hydration may replace opts.Template with a cache path
+	templateSlug := ""
+	if req.Config != nil {
+		templateSlug = req.Config.Template
+	}
+
 	// Debug log grove path
 	if s.config.Debug && req.GrovePath != "" {
 		slog.Debug("Using grove path from Hub", "path", req.GrovePath)
@@ -431,6 +437,11 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 				slog.Debug("Using hydrated template", "path", templatePath)
 			}
 		}
+	}
+
+	// Preserve human-friendly template slug for container labels
+	if templateSlug != "" {
+		opts.TemplateName = templateSlug
 	}
 
 	// Git clone mode: inject env vars and skip workspace mounting.

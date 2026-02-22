@@ -247,6 +247,10 @@ func (m *AgentManager) Start(ctx context.Context, opts api.StartOptions) (*api.A
 	if finalScionCfg != nil && finalScionCfg.Info != nil {
 		template = finalScionCfg.Info.Template
 	}
+	// Prefer human-friendly template slug over cache path or UUID
+	if opts.TemplateName != "" {
+		template = opts.TemplateName
+	}
 
 	if opts.Env == nil {
 		opts.Env = make(map[string]string)

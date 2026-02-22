@@ -453,6 +453,11 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 		CreatedBy:       createdBy,
 	}
 
+	// Store human-friendly slug instead of UUID for display
+	if resolvedTemplate != nil && resolvedTemplate.Slug != "" {
+		agent.Template = resolvedTemplate.Slug
+	}
+
 	if req.Config != nil {
 		agent.Image = req.Config.Image
 		if req.Config.Detached != nil {
@@ -746,15 +751,19 @@ func (s *Server) enrichAgents(ctx context.Context, agents []store.Agent) {
 		return
 	}
 
-	// Collect unique grove and broker IDs
+	// Collect unique grove, broker, and template IDs
 	groveIDs := make(map[string]struct{})
 	brokerIDs := make(map[string]struct{})
+	templateIDs := make(map[string]struct{})
 	for _, a := range agents {
 		if a.GroveID != "" {
 			groveIDs[a.GroveID] = struct{}{}
 		}
 		if a.RuntimeBrokerID != "" {
 			brokerIDs[a.RuntimeBrokerID] = struct{}{}
+		}
+		if a.AppliedConfig != nil && a.AppliedConfig.TemplateID != "" {
+			templateIDs[a.AppliedConfig.TemplateID] = struct{}{}
 		}
 	}
 
@@ -771,6 +780,14 @@ func (s *Server) enrichAgents(ctx context.Context, agents []store.Agent) {
 	for id := range brokerIDs {
 		if broker, err := s.store.GetRuntimeBroker(ctx, id); err == nil {
 			brokerInfo[id] = broker
+		}
+	}
+
+	// Fetch templates for slug enrichment
+	templateSlugs := make(map[string]string)
+	for id := range templateIDs {
+		if tmpl, err := s.store.GetTemplate(ctx, id); err == nil && tmpl.Slug != "" {
+			templateSlugs[id] = tmpl.Slug
 		}
 	}
 
@@ -793,6 +810,12 @@ func (s *Server) enrichAgents(ctx context.Context, agents []store.Agent) {
 						break
 					}
 				}
+			}
+		}
+		// Enrich template slug from TemplateID if Template is a UUID or empty
+		if agents[i].AppliedConfig != nil && agents[i].AppliedConfig.TemplateID != "" {
+			if slug, ok := templateSlugs[agents[i].AppliedConfig.TemplateID]; ok {
+				agents[i].Template = slug
 			}
 		}
 	}
@@ -845,6 +868,13 @@ func (s *Server) enrichAgent(ctx context.Context, agent *store.Agent, grove *sto
 					}
 				}
 			}
+		}
+	}
+
+	// Enrich template slug from TemplateID
+	if agent.AppliedConfig != nil && agent.AppliedConfig.TemplateID != "" {
+		if tmpl, err := s.store.GetTemplate(ctx, agent.AppliedConfig.TemplateID); err == nil && tmpl.Slug != "" {
+			agent.Template = tmpl.Slug
 		}
 	}
 }
@@ -2044,6 +2074,11 @@ func (s *Server) createGroveAgent(w http.ResponseWriter, r *http.Request, groveI
 		Labels:          req.Labels,
 		Visibility:      store.VisibilityPrivate,
 		CreatedBy:       createdBy,
+	}
+
+	// Store human-friendly slug instead of UUID for display
+	if resolvedTemplate != nil && resolvedTemplate.Slug != "" {
+		agent.Template = resolvedTemplate.Slug
 	}
 
 	if req.Config != nil {

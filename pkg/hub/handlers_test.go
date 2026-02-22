@@ -2016,3 +2016,181 @@ func TestGroveCreateWithSlug(t *testing.T) {
 		t.Errorf("expected auto-derived slug %q, got %q", "auto-slug-project", grove2.Slug)
 	}
 }
+
+// ============================================================================
+// Template Slug Display Tests
+// ============================================================================
+
+// TestAgentCreate_StoresTemplateSlug verifies that when an agent is created with
+// a template ID, the agent's Template field is set to the human-friendly slug
+// instead of the UUID.
+func TestAgentCreate_StoresTemplateSlug(t *testing.T) {
+	srv, s := testServer(t)
+	ctx := context.Background()
+
+	// Create a runtime broker
+	broker := &store.RuntimeBroker{
+		ID:     "host_tmpl_slug",
+		Slug:   "tmpl-host",
+		Name:   "Template Host",
+		Status: store.BrokerStatusOnline,
+	}
+	if err := s.CreateRuntimeBroker(ctx, broker); err != nil {
+		t.Fatalf("failed to create runtime broker: %v", err)
+	}
+
+	// Create a grove
+	grove := &store.Grove{
+		ID:                     "grove_tmpl_slug",
+		Slug:                   "tmpl-grove",
+		Name:                   "Template Grove",
+		GitRemote:              "github.com/test/tmpl-repo",
+		DefaultRuntimeBrokerID: broker.ID,
+		Created:                time.Now(),
+		Updated:                time.Now(),
+	}
+	if err := s.CreateGrove(ctx, grove); err != nil {
+		t.Fatalf("failed to create grove: %v", err)
+	}
+
+	// Register broker as provider
+	provider := &store.GroveProvider{
+		GroveID:    grove.ID,
+		BrokerID:   broker.ID,
+		BrokerName: broker.Name,
+		Status:     store.BrokerStatusOnline,
+	}
+	if err := s.AddGroveProvider(ctx, provider); err != nil {
+		t.Fatalf("failed to add grove provider: %v", err)
+	}
+
+	// Create a template with a known slug
+	tmpl := &store.Template{
+		ID:         "tmpl_uuid_123",
+		Slug:       "my-claude-template",
+		Name:       "My Claude Template",
+		Harness:    "claude",
+		Scope:      "global",
+		Visibility: store.VisibilityPublic,
+		Created:    time.Now(),
+		Updated:    time.Now(),
+	}
+	if err := s.CreateTemplate(ctx, tmpl); err != nil {
+		t.Fatalf("failed to create template: %v", err)
+	}
+
+	// Create agent referencing template by its ID (simulating CLI behavior)
+	body := map[string]interface{}{
+		"name":     "Slug Test Agent",
+		"groveId":  grove.ID,
+		"template": tmpl.ID,
+	}
+
+	rec := doRequest(t, srv, http.MethodPost, "/api/v1/agents", body)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected status 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp CreateAgentResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if resp.Agent == nil {
+		t.Fatal("expected agent in response")
+	}
+
+	// The Template field should contain the slug, not the UUID
+	if resp.Agent.Template != "my-claude-template" {
+		t.Errorf("expected agent.Template to be slug %q, got %q", "my-claude-template", resp.Agent.Template)
+	}
+
+	// The TemplateID in AppliedConfig should still have the UUID
+	if resp.Agent.AppliedConfig == nil {
+		t.Fatal("expected AppliedConfig to be set")
+	}
+	if resp.Agent.AppliedConfig.TemplateID != tmpl.ID {
+		t.Errorf("expected AppliedConfig.TemplateID %q, got %q", tmpl.ID, resp.Agent.AppliedConfig.TemplateID)
+	}
+}
+
+// TestEnrichAgents_ResolvesTemplateSlug verifies that enrichAgents populates
+// the Template field with the slug from TemplateID for agents that were created
+// before this fix (with UUIDs stored in Template).
+func TestEnrichAgents_ResolvesTemplateSlug(t *testing.T) {
+	srv, s := testServer(t)
+	ctx := context.Background()
+
+	// Create a template
+	tmpl := &store.Template{
+		ID:         "tmpl_enrich_123",
+		Slug:       "enriched-template",
+		Name:       "Enriched Template",
+		Harness:    "gemini",
+		Scope:      "global",
+		Visibility: store.VisibilityPublic,
+		Created:    time.Now(),
+		Updated:    time.Now(),
+	}
+	if err := s.CreateTemplate(ctx, tmpl); err != nil {
+		t.Fatalf("failed to create template: %v", err)
+	}
+
+	// Simulate an agent created before the fix: Template has UUID, TemplateID in AppliedConfig
+	agents := []store.Agent{
+		{
+			ID:       "agent_old_uuid",
+			Slug:     "old-agent",
+			Name:     "Old Agent",
+			Template: tmpl.ID, // UUID stored as template (the old behavior)
+			AppliedConfig: &store.AgentAppliedConfig{
+				TemplateID: tmpl.ID,
+			},
+		},
+	}
+
+	srv.enrichAgents(ctx, agents)
+
+	// enrichAgents should have replaced the UUID with the slug
+	if agents[0].Template != "enriched-template" {
+		t.Errorf("expected enriched Template %q, got %q", "enriched-template", agents[0].Template)
+	}
+}
+
+// TestEnrichAgent_ResolvesTemplateSlug verifies the single-agent enrichment path.
+func TestEnrichAgent_ResolvesTemplateSlug(t *testing.T) {
+	srv, s := testServer(t)
+	ctx := context.Background()
+
+	// Create a template
+	tmpl := &store.Template{
+		ID:         "tmpl_enrich_single",
+		Slug:       "single-enriched",
+		Name:       "Single Enriched",
+		Harness:    "claude",
+		Scope:      "global",
+		Visibility: store.VisibilityPublic,
+		Created:    time.Now(),
+		Updated:    time.Now(),
+	}
+	if err := s.CreateTemplate(ctx, tmpl); err != nil {
+		t.Fatalf("failed to create template: %v", err)
+	}
+
+	agent := &store.Agent{
+		ID:       "agent_single_enrich",
+		Slug:     "single-agent",
+		Name:     "Single Agent",
+		Template: tmpl.ID,
+		AppliedConfig: &store.AgentAppliedConfig{
+			TemplateID: tmpl.ID,
+		},
+	}
+
+	srv.enrichAgent(ctx, agent, nil, nil)
+
+	if agent.Template != "single-enriched" {
+		t.Errorf("expected enriched Template %q, got %q", "single-enriched", agent.Template)
+	}
+}

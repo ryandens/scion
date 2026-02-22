@@ -399,6 +399,7 @@ type StartOptions struct {
 	Name            string
 	Task            string
 	Template        string
+	TemplateName    string // Human-friendly template slug (overrides Template for labels when hydration replaces Template with a cache path)
 	Profile         string
 	HarnessConfig   string
 	Image           string
