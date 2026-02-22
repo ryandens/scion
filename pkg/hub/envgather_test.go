@@ -573,3 +573,208 @@ func TestEnvGather_HubEnvResolution(t *testing.T) {
 			mockClient.lastCreateReq.ResolvedEnv["GROVE_API_KEY"])
 	}
 }
+
+// TestEnvGather_HubHandler_RetryAfterCancel_GlobalRoute tests that when an agent
+// is stuck in "provisioning" (e.g. env-gather was cancelled) and a new create
+// request with GatherEnv=true arrives via the global route, the stale agent is
+// deleted and a fresh env-gather flow returns 202.
+func TestEnvGather_HubHandler_RetryAfterCancel_GlobalRoute(t *testing.T) {
+	srv, st := testServer(t)
+	ctx := context.Background()
+
+	grove := &store.Grove{ID: "grove-retry-global", Name: "retry-global-grove", Slug: "retry-global-grove"}
+	if err := st.CreateGrove(ctx, grove); err != nil {
+		t.Fatal(err)
+	}
+
+	broker := &store.RuntimeBroker{
+		ID: "broker-retry-global", Name: "retry-global-broker", Slug: "retry-global-broker",
+		Endpoint: "http://localhost:9800", Status: store.BrokerStatusOnline,
+	}
+	if err := st.CreateRuntimeBroker(ctx, broker); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := st.AddGroveProvider(ctx, &store.GroveProvider{
+		GroveID: "grove-retry-global", BrokerID: "broker-retry-global",
+		LocalPath: "/tmp/test-grove",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate a previous cancelled env-gather: agent exists in "provisioning" status
+	staleAgent := &store.Agent{
+		ID:              "stale-agent-global",
+		Name:            "retry-agent",
+		Slug:            "retry-agent",
+		GroveID:         "grove-retry-global",
+		RuntimeBrokerID: "broker-retry-global",
+		Status:          store.AgentStatusProvisioning,
+		AppliedConfig: &store.AgentAppliedConfig{
+			Harness: "claude",
+		},
+	}
+	if err := st.CreateAgent(ctx, staleAgent); err != nil {
+		t.Fatal(err)
+	}
+
+	// Set up dispatcher that returns env requirements (simulating missing env)
+	mockClient := &envGatherMockBrokerClient{
+		gatherReturnEnvReqs: &RemoteEnvRequirementsResponse{
+			AgentID:  "will-be-set",
+			Required: []string{"GEMINI_API_KEY"},
+			Needs:    []string{"GEMINI_API_KEY"},
+		},
+	}
+	dispatcher := NewHTTPAgentDispatcherWithClient(st, mockClient, true)
+	srv.SetDispatcher(dispatcher)
+
+	// Second create request with GatherEnv=true
+	reqBody := map[string]interface{}{
+		"name":      "retry-agent",
+		"groveId":   "grove-retry-global",
+		"template":  "claude",
+		"gatherEnv": true,
+	}
+
+	rec := doRequest(t, srv, http.MethodPost, "/api/v1/agents", reqBody)
+
+	// Should get 202 (env-gather needed), NOT 200 (agent started without env)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp CreateAgentResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal("failed to decode response:", err)
+	}
+
+	if resp.EnvGather == nil {
+		t.Fatal("expected EnvGather in response (env should be re-gathered)")
+	}
+
+	if len(resp.EnvGather.Needs) != 1 || resp.EnvGather.Needs[0] != "GEMINI_API_KEY" {
+		t.Errorf("expected needs=[GEMINI_API_KEY], got %v", resp.EnvGather.Needs)
+	}
+
+	// The stale agent should have been deleted
+	if mockClient.deleteCalled {
+		// Dispatcher was used to clean up on broker side - good
+	}
+
+	// A new agent should have been created (different ID from stale)
+	if resp.Agent == nil {
+		t.Fatal("expected agent in response")
+	}
+	if resp.Agent.ID == "stale-agent-global" {
+		t.Error("expected a new agent ID, got the stale agent ID")
+	}
+	if resp.Agent.Status != store.AgentStatusProvisioning {
+		t.Errorf("expected status=%q, got %q", store.AgentStatusProvisioning, resp.Agent.Status)
+	}
+
+	// The old agent should no longer exist in the store
+	_, err := st.GetAgent(ctx, "stale-agent-global")
+	if err != store.ErrNotFound {
+		t.Errorf("expected stale agent to be deleted, got err=%v", err)
+	}
+}
+
+// TestEnvGather_HubHandler_RetryAfterCancel_GroveRoute tests the same retry
+// scenario via the grove-scoped route /api/v1/groves/{groveId}/agents.
+func TestEnvGather_HubHandler_RetryAfterCancel_GroveRoute(t *testing.T) {
+	srv, st := testServer(t)
+	ctx := context.Background()
+
+	grove := &store.Grove{ID: "grove-retry-route", Name: "retry-route-grove", Slug: "retry-route-grove"}
+	if err := st.CreateGrove(ctx, grove); err != nil {
+		t.Fatal(err)
+	}
+
+	broker := &store.RuntimeBroker{
+		ID: "broker-retry-route", Name: "retry-route-broker", Slug: "retry-route-broker",
+		Endpoint: "http://localhost:9800", Status: store.BrokerStatusOnline,
+	}
+	if err := st.CreateRuntimeBroker(ctx, broker); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := st.AddGroveProvider(ctx, &store.GroveProvider{
+		GroveID: "grove-retry-route", BrokerID: "broker-retry-route",
+		LocalPath: "/tmp/test-grove",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate a previous cancelled env-gather: agent exists in "provisioning" status
+	staleAgent := &store.Agent{
+		ID:              "stale-agent-route",
+		Name:            "retry-route-agent",
+		Slug:            "retry-route-agent",
+		GroveID:         "grove-retry-route",
+		RuntimeBrokerID: "broker-retry-route",
+		Status:          store.AgentStatusProvisioning,
+		AppliedConfig: &store.AgentAppliedConfig{
+			Harness: "claude",
+		},
+	}
+	if err := st.CreateAgent(ctx, staleAgent); err != nil {
+		t.Fatal(err)
+	}
+
+	// Set up dispatcher that returns env requirements (simulating missing env)
+	mockClient := &envGatherMockBrokerClient{
+		gatherReturnEnvReqs: &RemoteEnvRequirementsResponse{
+			AgentID:  "will-be-set",
+			Required: []string{"GEMINI_API_KEY"},
+			Needs:    []string{"GEMINI_API_KEY"},
+		},
+	}
+	dispatcher := NewHTTPAgentDispatcherWithClient(st, mockClient, true)
+	srv.SetDispatcher(dispatcher)
+
+	// Second create request via grove-scoped route with GatherEnv=true
+	reqBody := map[string]interface{}{
+		"name":      "retry-route-agent",
+		"template":  "claude",
+		"gatherEnv": true,
+	}
+
+	rec := doRequest(t, srv, http.MethodPost,
+		fmt.Sprintf("/api/v1/groves/%s/agents", grove.ID), reqBody)
+
+	// Should get 202 (env-gather needed), NOT 200 (agent started without env)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp CreateAgentResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal("failed to decode response:", err)
+	}
+
+	if resp.EnvGather == nil {
+		t.Fatal("expected EnvGather in response (env should be re-gathered)")
+	}
+
+	if len(resp.EnvGather.Needs) != 1 || resp.EnvGather.Needs[0] != "GEMINI_API_KEY" {
+		t.Errorf("expected needs=[GEMINI_API_KEY], got %v", resp.EnvGather.Needs)
+	}
+
+	// A new agent should have been created (different ID from stale)
+	if resp.Agent == nil {
+		t.Fatal("expected agent in response")
+	}
+	if resp.Agent.ID == "stale-agent-route" {
+		t.Error("expected a new agent ID, got the stale agent ID")
+	}
+	if resp.Agent.Status != store.AgentStatusProvisioning {
+		t.Errorf("expected status=%q, got %q", store.AgentStatusProvisioning, resp.Agent.Status)
+	}
+
+	// The old agent should no longer exist in the store
+	_, err := st.GetAgent(ctx, "stale-agent-route")
+	if err != store.ErrNotFound {
+		t.Errorf("expected stale agent to be deleted, got err=%v", err)
+	}
+}

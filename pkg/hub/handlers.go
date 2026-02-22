@@ -343,6 +343,22 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 		existingAgent = nil // Fall through to create new agent below
 	}
 
+	// If the agent is stuck in "provisioning" (e.g. env-gather was cancelled by the user)
+	// and the new request wants env-gather, delete the stale agent so a fresh
+	// env-gather flow runs from scratch.
+	if existingAgent != nil && req.GatherEnv &&
+		existingAgent.Status == store.AgentStatusProvisioning {
+		dispatcher := s.GetDispatcher()
+		if dispatcher != nil && existingAgent.RuntimeBrokerID != "" {
+			_ = dispatcher.DispatchAgentDelete(ctx, existingAgent, false, false)
+		}
+		if err := s.store.DeleteAgent(ctx, existingAgent.ID); err != nil {
+			writeErrorFromErr(w, err, "")
+			return
+		}
+		existingAgent = nil // Fall through to create new agent with env-gather
+	}
+
 	if existingAgent != nil && !req.ProvisionOnly &&
 		(existingAgent.Status == store.AgentStatusCreated ||
 			existingAgent.Status == store.AgentStatusProvisioning ||
@@ -1923,6 +1939,22 @@ func (s *Server) createGroveAgent(w http.ResponseWriter, r *http.Request, groveI
 		if err != nil && err != store.ErrNotFound {
 			writeErrorFromErr(w, err, "")
 			return
+		}
+
+		// If the agent is stuck in "provisioning" (e.g. env-gather was cancelled)
+		// and the new request wants env-gather, delete the stale agent so a fresh
+		// env-gather flow runs from scratch.
+		if existingAgent != nil && req.GatherEnv &&
+			existingAgent.Status == store.AgentStatusProvisioning {
+			dispatcher := s.GetDispatcher()
+			if dispatcher != nil && existingAgent.RuntimeBrokerID != "" {
+				_ = dispatcher.DispatchAgentDelete(ctx, existingAgent, false, false)
+			}
+			if err := s.store.DeleteAgent(ctx, existingAgent.ID); err != nil {
+				writeErrorFromErr(w, err, "")
+				return
+			}
+			existingAgent = nil // Fall through to create new agent with env-gather
 		}
 
 		if existingAgent != nil {
