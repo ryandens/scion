@@ -1,3 +1,19 @@
+# Release Notes (Feb 24, 2026)
+
+This release focuses on synchronizing JSON schemas with Go configuration structs and enhancing settings for GKE, soft-delete, and harness-agnostic templates.
+
+## 🚀 Features
+* **GKE Support:** Added a `gke` boolean to runtime configurations to enable GKE-specific features like Workload Identity.
+* **Soft-Delete Lifecycle:** Introduced `soft_delete_retention` and `soft_delete_retain_files` to the Hub server configuration, allowing for temporary retention and recovery of deleted agents.
+* **Harness-Agnostic Templates:** Added `agent_instructions`, `system_prompt`, and `default_harness_config` fields to the agent configuration schema to support role-based templates that work across different LLM harnesses.
+* **Per-Agent Hub Overrides:** Agents can now specify a custom Hub endpoint in their `scion-agent.yaml`, overriding grove and server-level defaults.
+* **Sidecar Environment Variables:** Added support for environment variables in auxiliary sidecar services.
+* **Ready Check Enhancements:** Added a `delay` ready check type for services that simply need a fixed wait period.
+
+## 🐛 Fixes
+* **Schema Alignment:** Synchronized numerous field names between Go tags and JSON schemas, including camelCase fixes for `runtimeClassName`, `serviceAccountName`, and `auth_selectedType`.
+* **Validation Suite:** Added comprehensive full-schema validation tests for both settings and agent configurations.
+
 # Release Notes (Feb 22, 2026)
 
 This period introduced significant data management features, including agent soft-delete and centralized harness configuration storage, while advancing the secrets management and execution limits infrastructure.
