@@ -342,9 +342,10 @@ type Server struct {
 	brokerAuthService   *BrokerAuthService    // Broker HMAC authentication service
 	auditLogger       AuditLogger         // Audit logger for security events
 	metrics           MetricsRecorder     // Metrics recorder for broker auth
-	controlChannel    *ControlChannelManager // WebSocket control channel for runtime brokers
-	authzService      *AuthzService       // Authorization service for policy evaluation
-	events            EventPublisher      // Event publisher for real-time SSE updates
+	controlChannel            *ControlChannelManager // WebSocket control channel for runtime brokers
+	authzService              *AuthzService       // Authorization service for policy evaluation
+	events                    EventPublisher      // Event publisher for real-time SSE updates
+	notificationDispatcher    *NotificationDispatcher // Notification dispatcher for agent status events
 }
 
 // New creates a new Hub API server.
@@ -820,6 +821,12 @@ func (s *Server) Start(ctx context.Context) error {
 	// Start the purge loop for soft-deleted agents
 	s.startPurgeLoop(ctx)
 
+	// Start notification dispatcher if event publisher supports subscriptions
+	if ep, ok := s.events.(*ChannelEventPublisher); ok {
+		s.notificationDispatcher = NewNotificationDispatcher(s.store, ep, s.GetDispatcher())
+		s.notificationDispatcher.Start()
+	}
+
 	slog.Info("Hub API server starting", "host", s.config.Host, "port", s.config.Port)
 
 	errCh := make(chan error, 1)
@@ -861,6 +868,11 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		s.brokerAuthService.Close()
 	}
 
+	// Stop notification dispatcher before closing event publisher
+	if s.notificationDispatcher != nil {
+		s.notificationDispatcher.Stop()
+	}
+
 	// Close event publisher
 	if s.events != nil {
 		s.events.Close()
@@ -887,6 +899,9 @@ func (s *Server) CleanupResources(ctx context.Context) error {
 	}
 	if s.brokerAuthService != nil {
 		s.brokerAuthService.Close()
+	}
+	if s.notificationDispatcher != nil {
+		s.notificationDispatcher.Stop()
 	}
 	if s.events != nil {
 		s.events.Close()
