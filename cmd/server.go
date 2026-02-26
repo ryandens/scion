@@ -753,6 +753,9 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 			webSrv.SetStore(hubSrv.GetStore())
 			webSrv.SetUserTokenService(hubSrv.GetUserTokenService())
 
+			// Share runtime maintenance state between Hub and Web servers
+			webSrv.SetMaintenanceState(hubSrv.GetMaintenanceState())
+
 			// Mount Hub API on Web server — single port serves both.
 			webSrv.MountHubAPI(hubSrv.Handler(), hubSrv.CleanupResources)
 

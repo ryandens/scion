@@ -145,6 +145,7 @@ type WebServer struct {
 	events       *ChannelEventPublisher // nil when no publisher configured
 	hubHandler   http.Handler           // mounted Hub API handler, or nil
 	hubShutdown  func(context.Context) error // Hub resource cleanup, or nil
+	maintenance  *MaintenanceState     // runtime maintenance mode state (shared with Hub)
 	startTime    time.Time
 
 	// Health providers for composite health response (combo mode)
@@ -408,6 +409,11 @@ func NewWebServer(cfg WebServerConfig) *WebServer {
 	ws.registerRoutes()
 
 	return ws
+}
+
+// SetMaintenanceState sets the shared runtime maintenance state.
+func (ws *WebServer) SetMaintenanceState(ms *MaintenanceState) {
+	ws.maintenance = ms
 }
 
 // SetOAuthService sets the OAuth service for web OAuth flows.
@@ -1411,10 +1417,9 @@ func (ws *WebServer) loggingMiddleware(next http.Handler) http.Handler {
 func (ws *WebServer) buildHandler() http.Handler {
 	var handler http.Handler = ws.mux
 
-	// Admin mode middleware (innermost — runs after session user is loaded)
-	if ws.config.AdminMode {
-		handler = ws.adminModeWebMiddleware(handler)
-	}
+	// Admin mode middleware (innermost — runs after session user is loaded).
+	// Always applied — checks runtime MaintenanceState on each request.
+	handler = ws.adminModeWebMiddleware(handler)
 
 	// Session auth middleware (loads session user into context, redirects to login)
 	handler = ws.sessionAuthMiddleware(handler)

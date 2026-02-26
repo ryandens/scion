@@ -21,8 +21,9 @@
  */
 
 import { LitElement, html, css } from 'lit';
-import { customElement, property } from 'lit/decorators.js';
+import { customElement, property, state } from 'lit/decorators.js';
 
+import { apiFetch } from '../../client/api.js';
 import type { User } from '../../shared/types.js';
 
 interface NavItem {
@@ -88,6 +89,9 @@ export class ScionNav extends LitElement {
    */
   @property({ type: Boolean, reflect: true })
   collapsed = false;
+
+  @state()
+  private maintenanceEnabled = false;
 
   static override styles = css`
     :host {
@@ -241,6 +245,83 @@ export class ScionNav extends LitElement {
     :host([collapsed]) .nav-link-text {
       display: none;
     }
+
+    .maintenance-toggle {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.625rem 0.75rem;
+      border-radius: 0.5rem;
+      font-size: 0.875rem;
+      font-weight: 500;
+      color: var(--scion-text, #1e293b);
+    }
+
+    :host([collapsed]) .maintenance-toggle {
+      justify-content: center;
+      padding: 0.75rem;
+    }
+
+    .maintenance-toggle sl-icon {
+      font-size: 1.125rem;
+      flex-shrink: 0;
+    }
+
+    .maintenance-toggle-label {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    :host([collapsed]) .maintenance-toggle-label {
+      display: none;
+    }
+
+    .toggle-track {
+      position: relative;
+      width: 36px;
+      height: 20px;
+      background: var(--scion-border, #e2e8f0);
+      border-radius: 10px;
+      cursor: pointer;
+      transition: background 0.2s ease;
+      border: none;
+      padding: 0;
+      flex-shrink: 0;
+      margin-left: auto;
+    }
+
+    :host([collapsed]) .toggle-track {
+      margin-left: 0;
+    }
+
+    .toggle-track:hover {
+      background: var(--scion-text-muted, #94a3b8);
+    }
+
+    .toggle-track.active {
+      background: var(--scion-warning, #f59e0b);
+    }
+
+    .toggle-track.active:hover {
+      background: #d97706;
+    }
+
+    .toggle-knob {
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 16px;
+      height: 16px;
+      background: white;
+      border-radius: 50%;
+      transition: transform 0.2s ease;
+      pointer-events: none;
+    }
+
+    .toggle-track.active .toggle-knob {
+      transform: translateX(16px);
+    }
   `;
 
   override render() {
@@ -299,11 +380,59 @@ export class ScionNav extends LitElement {
                     `
                   )}
                 </ul>
+                <div class="maintenance-toggle">
+                  <sl-icon name="exclamation-triangle"></sl-icon>
+                  <span class="maintenance-toggle-label">Maintenance</span>
+                  <button
+                    class="toggle-track ${this.maintenanceEnabled ? 'active' : ''}"
+                    @click=${(): void => this.toggleMaintenance()}
+                    aria-label="Toggle maintenance mode"
+                  >
+                    <span class="toggle-knob"></span>
+                  </button>
+                </div>
               </div>
             `
           : ''}
       </nav>
     `;
+  }
+
+  override updated(changed: Map<string, unknown>): void {
+    if (changed.has('user')) {
+      if (this.user?.role === 'admin') {
+        this.fetchMaintenanceState();
+      }
+    }
+  }
+
+  private async fetchMaintenanceState(): Promise<void> {
+    try {
+      const res = await apiFetch('/api/v1/admin/maintenance');
+      if (res.ok) {
+        const data = await res.json();
+        this.maintenanceEnabled = data.enabled;
+      }
+    } catch {
+      // Silently ignore — toggle will default to off.
+    }
+  }
+
+  private async toggleMaintenance(): Promise<void> {
+    const newValue = !this.maintenanceEnabled;
+    try {
+      const res = await apiFetch('/api/v1/admin/maintenance', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: newValue }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        this.maintenanceEnabled = data.enabled;
+      }
+    } catch {
+      // Revert on failure
+    }
   }
 
   /**

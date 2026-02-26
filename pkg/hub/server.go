@@ -351,16 +351,18 @@ type Server struct {
 	authzService              *AuthzService       // Authorization service for policy evaluation
 	events                    EventPublisher      // Event publisher for real-time SSE updates
 	notificationDispatcher    *NotificationDispatcher // Notification dispatcher for agent status events
+	maintenance               *MaintenanceState   // Runtime maintenance mode state
 }
 
 // New creates a new Hub API server.
 func New(cfg ServerConfig, s store.Store) *Server {
 	srv := &Server{
-		config:    cfg,
-		store:     s,
-		mux:       http.NewServeMux(),
-		startTime: time.Now(),
-		events:    noopEventPublisher{},
+		config:      cfg,
+		store:       s,
+		mux:         http.NewServeMux(),
+		startTime:   time.Now(),
+		events:      noopEventPublisher{},
+		maintenance: NewMaintenanceState(cfg.AdminMode, cfg.MaintenanceMessage),
 	}
 
 	ctx := context.Background()
@@ -669,6 +671,11 @@ func (s *Server) SetMetrics(m MetricsRecorder) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.metrics = m
+}
+
+// GetMaintenanceState returns the runtime maintenance state.
+func (s *Server) GetMaintenanceState() *MaintenanceState {
+	return s.maintenance
 }
 
 // SetEventPublisher sets the event publisher for real-time SSE updates.
@@ -989,6 +996,9 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/v1/brokers/join", s.handleBrokerJoin)
 	s.mux.HandleFunc("/api/v1/brokers/", s.handleBrokerByIDRoutes)
 
+	// Admin system endpoints
+	s.mux.HandleFunc("/api/v1/admin/maintenance", s.handleAdminMaintenance)
+
 	// Notification endpoints (user-facing)
 	s.mux.HandleFunc("/api/v1/notifications", s.handleNotifications)
 	s.mux.HandleFunc("/api/v1/notifications/", s.handleNotificationRoutes)
@@ -1013,10 +1023,9 @@ func (s *Server) applyMiddleware(h http.Handler) http.Handler {
 		}
 	}
 
-	// Apply admin mode middleware (after auth, so identity is available)
-	if s.config.AdminMode {
-		h = adminModeMiddleware(s.config.MaintenanceMessage)(h)
-	}
+	// Apply admin mode middleware (after auth, so identity is available).
+	// Always applied — checks runtime MaintenanceState on each request.
+	h = adminModeMiddleware(s.maintenance)(h)
 
 	// Apply unified auth middleware
 	// This handles all authentication types: agent tokens, user tokens, API keys, dev tokens

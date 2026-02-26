@@ -15,6 +15,7 @@
 package hub
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -31,21 +32,68 @@ var passthrough = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) 
 	w.Write([]byte("OK"))
 })
 
+// --- MaintenanceState unit tests ---
+
+func TestMaintenanceState_Defaults(t *testing.T) {
+	ms := NewMaintenanceState(false, "")
+	if ms.IsEnabled() {
+		t.Error("expected disabled by default")
+	}
+	if ms.Message() != defaultMaintenanceMessage {
+		t.Errorf("expected default message, got %q", ms.Message())
+	}
+}
+
+func TestMaintenanceState_SetEnabled(t *testing.T) {
+	ms := NewMaintenanceState(false, "")
+	ms.SetEnabled(true)
+	if !ms.IsEnabled() {
+		t.Error("expected enabled after SetEnabled(true)")
+	}
+	ms.SetEnabled(false)
+	if ms.IsEnabled() {
+		t.Error("expected disabled after SetEnabled(false)")
+	}
+}
+
+func TestMaintenanceState_SetMessage(t *testing.T) {
+	ms := NewMaintenanceState(false, "")
+	ms.SetMessage("custom msg")
+	if ms.Message() != "custom msg" {
+		t.Errorf("expected 'custom msg', got %q", ms.Message())
+	}
+}
+
+func TestMaintenanceState_Set(t *testing.T) {
+	ms := NewMaintenanceState(false, "")
+	ms.Set(true, "both updated")
+	if !ms.IsEnabled() {
+		t.Error("expected enabled")
+	}
+	if ms.Message() != "both updated" {
+		t.Errorf("expected 'both updated', got %q", ms.Message())
+	}
+}
+
 // --- Hub API middleware tests ---
 
 func TestAdminModeMiddleware_Disabled(t *testing.T) {
-	// When admin mode is not applied, requests pass through.
+	// When maintenance is disabled, requests pass through.
+	state := NewMaintenanceState(false, "")
+	mw := adminModeMiddleware(state)(passthrough)
+
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/agents", nil)
 	rr := httptest.NewRecorder()
-	passthrough.ServeHTTP(rr, req)
+	mw.ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rr.Code)
+		t.Fatalf("expected 200 when disabled, got %d", rr.Code)
 	}
 }
 
 func TestAdminModeMiddleware_AdminUser(t *testing.T) {
-	mw := adminModeMiddleware("")(passthrough)
+	state := NewMaintenanceState(true, "")
+	mw := adminModeMiddleware(state)(passthrough)
 
 	admin := NewAuthenticatedUser("u1", "admin@example.com", "Admin", "admin", "cli")
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/agents", nil)
@@ -59,7 +107,8 @@ func TestAdminModeMiddleware_AdminUser(t *testing.T) {
 }
 
 func TestAdminModeMiddleware_NonAdminUser(t *testing.T) {
-	mw := adminModeMiddleware("")(passthrough)
+	state := NewMaintenanceState(true, "")
+	mw := adminModeMiddleware(state)(passthrough)
 
 	user := NewAuthenticatedUser("u2", "user@example.com", "User", "member", "cli")
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/agents", nil)
@@ -84,7 +133,8 @@ func TestAdminModeMiddleware_NonAdminUser(t *testing.T) {
 }
 
 func TestAdminModeMiddleware_Unauthenticated(t *testing.T) {
-	mw := adminModeMiddleware("")(passthrough)
+	state := NewMaintenanceState(true, "")
+	mw := adminModeMiddleware(state)(passthrough)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/agents", nil)
 	rr := httptest.NewRecorder()
@@ -96,7 +146,8 @@ func TestAdminModeMiddleware_Unauthenticated(t *testing.T) {
 }
 
 func TestAdminModeMiddleware_AgentIdentity(t *testing.T) {
-	mw := adminModeMiddleware("")(passthrough)
+	state := NewMaintenanceState(true, "")
+	mw := adminModeMiddleware(state)(passthrough)
 
 	agent := &agentIdentityWrapper{&AgentTokenClaims{
 		Claims:  jwt.Claims{Subject: "agent-1"},
@@ -113,7 +164,8 @@ func TestAdminModeMiddleware_AgentIdentity(t *testing.T) {
 }
 
 func TestAdminModeMiddleware_BrokerIdentity(t *testing.T) {
-	mw := adminModeMiddleware("")(passthrough)
+	state := NewMaintenanceState(true, "")
+	mw := adminModeMiddleware(state)(passthrough)
 
 	broker := NewBrokerIdentity("broker-1")
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/agents", nil)
@@ -130,7 +182,8 @@ func TestAdminModeMiddleware_BrokerIdentity(t *testing.T) {
 
 func TestAdminModeMiddleware_CustomMessage(t *testing.T) {
 	customMsg := "We are upgrading the system"
-	mw := adminModeMiddleware(customMsg)(passthrough)
+	state := NewMaintenanceState(true, customMsg)
+	mw := adminModeMiddleware(state)(passthrough)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/agents", nil)
 	rr := httptest.NewRecorder()
@@ -149,14 +202,50 @@ func TestAdminModeMiddleware_CustomMessage(t *testing.T) {
 	}
 }
 
+func TestAdminModeMiddleware_RuntimeToggle(t *testing.T) {
+	// Start with maintenance off, toggle on mid-flight.
+	state := NewMaintenanceState(false, "")
+	mw := adminModeMiddleware(state)(passthrough)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/agents", nil)
+	rr := httptest.NewRecorder()
+	mw.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 when disabled, got %d", rr.Code)
+	}
+
+	// Enable maintenance mode at runtime.
+	state.SetEnabled(true)
+
+	rr = httptest.NewRecorder()
+	mw.ServeHTTP(rr, req)
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 after enabling, got %d", rr.Code)
+	}
+
+	// Disable again.
+	state.SetEnabled(false)
+
+	rr = httptest.NewRecorder()
+	mw.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 after disabling, got %d", rr.Code)
+	}
+}
+
 // --- Web server middleware tests ---
 
-func TestAdminModeWebMiddleware_AdminPassesThrough(t *testing.T) {
-	// When admin mode is on, admin users pass through to the inner handler.
+func newTestWebServerWithMaintenance(enabled bool, message string) *WebServer {
 	ws := &WebServer{
-		config: WebServerConfig{AdminMode: true},
-		mux:    http.NewServeMux(),
+		config:      WebServerConfig{},
+		mux:         http.NewServeMux(),
+		maintenance: NewMaintenanceState(enabled, message),
 	}
+	return ws
+}
+
+func TestAdminModeWebMiddleware_AdminPassesThrough(t *testing.T) {
+	ws := newTestWebServerWithMaintenance(true, "")
 	ws.mux.HandleFunc("/dashboard", passthrough)
 
 	handler := ws.adminModeWebMiddleware(ws.mux)
@@ -173,10 +262,7 @@ func TestAdminModeWebMiddleware_AdminPassesThrough(t *testing.T) {
 }
 
 func TestAdminModeWebMiddleware_AuthRoutes(t *testing.T) {
-	ws := &WebServer{
-		config: WebServerConfig{AdminMode: true},
-		mux:    http.NewServeMux(),
-	}
+	ws := newTestWebServerWithMaintenance(true, "")
 	ws.mux.HandleFunc("/auth/login/", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
@@ -201,10 +287,7 @@ func TestAdminModeWebMiddleware_AuthRoutes(t *testing.T) {
 }
 
 func TestAdminModeWebMiddleware_NonAdminUser(t *testing.T) {
-	ws := &WebServer{
-		config: WebServerConfig{AdminMode: true},
-		mux:    http.NewServeMux(),
-	}
+	ws := newTestWebServerWithMaintenance(true, "")
 	ws.mux.HandleFunc("/", passthrough)
 
 	handler := ws.adminModeWebMiddleware(ws.mux)
@@ -233,10 +316,7 @@ func TestAdminModeWebMiddleware_NonAdminUser(t *testing.T) {
 }
 
 func TestAdminModeWebMiddleware_AdminUser(t *testing.T) {
-	ws := &WebServer{
-		config: WebServerConfig{AdminMode: true},
-		mux:    http.NewServeMux(),
-	}
+	ws := newTestWebServerWithMaintenance(true, "")
 	ws.mux.HandleFunc("/", passthrough)
 
 	handler := ws.adminModeWebMiddleware(ws.mux)
@@ -254,10 +334,7 @@ func TestAdminModeWebMiddleware_AdminUser(t *testing.T) {
 }
 
 func TestAdminModeWebMiddleware_Unauthenticated(t *testing.T) {
-	ws := &WebServer{
-		config: WebServerConfig{AdminMode: true},
-		mux:    http.NewServeMux(),
-	}
+	ws := newTestWebServerWithMaintenance(true, "")
 	ws.mux.HandleFunc("/", passthrough)
 
 	handler := ws.adminModeWebMiddleware(ws.mux)
@@ -273,10 +350,7 @@ func TestAdminModeWebMiddleware_Unauthenticated(t *testing.T) {
 
 func TestAdminModeWebMiddleware_CustomMessage(t *testing.T) {
 	customMsg := "Back in 30 minutes"
-	ws := &WebServer{
-		config: WebServerConfig{AdminMode: true, MaintenanceMessage: customMsg},
-		mux:    http.NewServeMux(),
-	}
+	ws := newTestWebServerWithMaintenance(true, customMsg)
 	ws.mux.HandleFunc("/", passthrough)
 
 	handler := ws.adminModeWebMiddleware(ws.mux)
@@ -296,10 +370,7 @@ func TestAdminModeWebMiddleware_CustomMessage(t *testing.T) {
 }
 
 func TestAdminModeWebMiddleware_APIRoutesPassThrough(t *testing.T) {
-	ws := &WebServer{
-		config: WebServerConfig{AdminMode: true},
-		mux:    http.NewServeMux(),
-	}
+	ws := newTestWebServerWithMaintenance(true, "")
 	ws.mux.HandleFunc("/api/v1/agents", passthrough)
 
 	handler := ws.adminModeWebMiddleware(ws.mux)
@@ -314,10 +385,7 @@ func TestAdminModeWebMiddleware_APIRoutesPassThrough(t *testing.T) {
 }
 
 func TestAdminModeWebMiddleware_StaticAssetsPassThrough(t *testing.T) {
-	ws := &WebServer{
-		config: WebServerConfig{AdminMode: true},
-		mux:    http.NewServeMux(),
-	}
+	ws := newTestWebServerWithMaintenance(true, "")
 	ws.mux.HandleFunc("/assets/main.js", passthrough)
 	ws.mux.HandleFunc("/favicon.ico", passthrough)
 
@@ -334,6 +402,24 @@ func TestAdminModeWebMiddleware_StaticAssetsPassThrough(t *testing.T) {
 	}
 }
 
+func TestAdminModeWebMiddleware_NilState(t *testing.T) {
+	// When no MaintenanceState is set, everything passes through.
+	ws := &WebServer{config: WebServerConfig{}, mux: http.NewServeMux()}
+	ws.mux.HandleFunc("/", passthrough)
+
+	handler := ws.adminModeWebMiddleware(ws.mux)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("nil maintenance state should pass through, got %d", rr.Code)
+	}
+}
+
+// --- HTML page tests ---
+
 func TestMaintenancePageHTML_EscapesMessage(t *testing.T) {
 	msg := `<script>alert("xss")</script>`
 	html := maintenancePageHTML(msg)
@@ -343,6 +429,111 @@ func TestMaintenancePageHTML_EscapesMessage(t *testing.T) {
 	}
 	if !strings.Contains(html, "&lt;script&gt;") {
 		t.Error("expected HTML-escaped script tag")
+	}
+}
+
+// --- API handler tests ---
+
+func TestHandleAdminMaintenance_Get(t *testing.T) {
+	srv := &Server{
+		maintenance: NewMaintenanceState(false, "test message"),
+	}
+
+	admin := NewAuthenticatedUser("u1", "admin@example.com", "Admin", "admin", "cli")
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/maintenance", nil)
+	req = req.WithContext(contextWithIdentity(req.Context(), admin))
+	rr := httptest.NewRecorder()
+	srv.handleAdminMaintenance(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+
+	var body map[string]interface{}
+	json.NewDecoder(rr.Body).Decode(&body)
+	if body["enabled"] != false {
+		t.Errorf("expected enabled=false, got %v", body["enabled"])
+	}
+	if body["message"] != "test message" {
+		t.Errorf("expected message='test message', got %v", body["message"])
+	}
+}
+
+func TestHandleAdminMaintenance_Put(t *testing.T) {
+	srv := &Server{
+		maintenance: NewMaintenanceState(false, ""),
+	}
+
+	admin := NewAuthenticatedUser("u1", "admin@example.com", "Admin", "admin", "cli")
+	payload := `{"enabled": true, "message": "going down"}`
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/maintenance", bytes.NewBufferString(payload))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(contextWithIdentity(req.Context(), admin))
+	rr := httptest.NewRecorder()
+	srv.handleAdminMaintenance(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+
+	var body map[string]interface{}
+	json.NewDecoder(rr.Body).Decode(&body)
+	if body["enabled"] != true {
+		t.Errorf("expected enabled=true, got %v", body["enabled"])
+	}
+	if body["message"] != "going down" {
+		t.Errorf("expected message='going down', got %v", body["message"])
+	}
+
+	// Verify state was actually updated.
+	if !srv.maintenance.IsEnabled() {
+		t.Error("maintenance should be enabled after PUT")
+	}
+}
+
+func TestHandleAdminMaintenance_NonAdmin(t *testing.T) {
+	srv := &Server{
+		maintenance: NewMaintenanceState(false, ""),
+	}
+
+	user := NewAuthenticatedUser("u2", "user@example.com", "User", "member", "cli")
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/maintenance", nil)
+	req = req.WithContext(contextWithIdentity(req.Context(), user))
+	rr := httptest.NewRecorder()
+	srv.handleAdminMaintenance(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("non-admin should get 403, got %d", rr.Code)
+	}
+}
+
+func TestHandleAdminMaintenance_Unauthenticated(t *testing.T) {
+	srv := &Server{
+		maintenance: NewMaintenanceState(false, ""),
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/maintenance", nil)
+	rr := httptest.NewRecorder()
+	srv.handleAdminMaintenance(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("unauthenticated should get 403, got %d", rr.Code)
+	}
+}
+
+func TestHandleAdminMaintenance_MethodNotAllowed(t *testing.T) {
+	srv := &Server{
+		maintenance: NewMaintenanceState(false, ""),
+	}
+
+	admin := NewAuthenticatedUser("u1", "admin@example.com", "Admin", "admin", "cli")
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/admin/maintenance", nil)
+	req = req.WithContext(contextWithIdentity(req.Context(), admin))
+	rr := httptest.NewRecorder()
+	srv.handleAdminMaintenance(rr, req)
+
+	if rr.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405, got %d", rr.Code)
 	}
 }
 

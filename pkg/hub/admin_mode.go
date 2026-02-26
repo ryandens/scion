@@ -19,21 +19,81 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 )
 
 const defaultMaintenanceMessage = "System offline for maintenance"
 
-// adminModeMiddleware restricts Hub API access to admin users only.
-// Non-admin users receive a 503 JSON response. Agents and brokers are
-// allowed through so that system operations continue uninterrupted.
-func adminModeMiddleware(maintenanceMessage string) func(http.Handler) http.Handler {
-	msg := maintenanceMessage
-	if msg == "" {
-		msg = defaultMaintenanceMessage
-	}
+// MaintenanceState holds runtime maintenance mode state shared between
+// the Hub API server and the Web frontend server. It is safe for
+// concurrent access.
+type MaintenanceState struct {
+	mu      sync.RWMutex
+	enabled bool
+	message string
+}
 
+// NewMaintenanceState creates a MaintenanceState with the given initial values.
+func NewMaintenanceState(enabled bool, message string) *MaintenanceState {
+	return &MaintenanceState{
+		enabled: enabled,
+		message: message,
+	}
+}
+
+// IsEnabled returns whether maintenance mode is currently active.
+func (ms *MaintenanceState) IsEnabled() bool {
+	ms.mu.RLock()
+	defer ms.mu.RUnlock()
+	return ms.enabled
+}
+
+// Message returns the current maintenance message, falling back to the
+// default if none is set.
+func (ms *MaintenanceState) Message() string {
+	ms.mu.RLock()
+	defer ms.mu.RUnlock()
+	if ms.message == "" {
+		return defaultMaintenanceMessage
+	}
+	return ms.message
+}
+
+// SetEnabled enables or disables maintenance mode.
+func (ms *MaintenanceState) SetEnabled(v bool) {
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+	ms.enabled = v
+}
+
+// SetMessage updates the maintenance message.
+func (ms *MaintenanceState) SetMessage(msg string) {
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+	ms.message = msg
+}
+
+// Set updates both enabled and message atomically.
+func (ms *MaintenanceState) Set(enabled bool, message string) {
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+	ms.enabled = enabled
+	ms.message = message
+}
+
+// adminModeMiddleware restricts Hub API access to admin users only when
+// maintenance mode is enabled. Non-admin users receive a 503 JSON response.
+// Agents and brokers are allowed through so that system operations continue
+// uninterrupted. The middleware checks the runtime MaintenanceState on every
+// request, so toggling maintenance mode takes effect immediately.
+func adminModeMiddleware(state *MaintenanceState) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !state.IsEnabled() {
+				next.ServeHTTP(w, r)
+				return
+			}
+
 			// Allow agents through — system operations must continue.
 			if agent := GetAgentIdentityFromContext(r.Context()); agent != nil {
 				next.ServeHTTP(w, r)
@@ -57,22 +117,23 @@ func adminModeMiddleware(maintenanceMessage string) func(http.Handler) http.Hand
 			w.WriteHeader(http.StatusServiceUnavailable)
 			json.NewEncoder(w).Encode(map[string]string{
 				"error":   "system_maintenance",
-				"message": msg,
+				"message": state.Message(),
 			})
 		})
 	}
 }
 
-// adminModeWebMiddleware restricts web frontend access to admin users only.
-// Auth routes and health checks are allowed through so admins can log in.
-// Non-admin users see a self-contained HTML maintenance page.
+// adminModeWebMiddleware restricts web frontend access to admin users only
+// when maintenance mode is enabled. Auth routes and health checks are always
+// allowed through so admins can log in. Non-admin users see a self-contained
+// HTML maintenance page.
 func (ws *WebServer) adminModeWebMiddleware(next http.Handler) http.Handler {
-	msg := ws.config.MaintenanceMessage
-	if msg == "" {
-		msg = defaultMaintenanceMessage
-	}
-
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if ws.maintenance == nil || !ws.maintenance.IsEnabled() {
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		path := r.URL.Path
 
 		// Allow auth routes so admins can log in.
@@ -110,8 +171,51 @@ func (ws *WebServer) adminModeWebMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 		w.WriteHeader(http.StatusServiceUnavailable)
-		fmt.Fprint(w, maintenancePageHTML(msg))
+		fmt.Fprint(w, maintenancePageHTML(ws.maintenance.Message()))
 	})
+}
+
+// handleAdminMaintenance handles GET and PUT /api/v1/admin/maintenance.
+// GET returns the current maintenance state; PUT updates it.
+// Both require admin role.
+func (s *Server) handleAdminMaintenance(w http.ResponseWriter, r *http.Request) {
+	// Require admin user.
+	user := GetUserIdentityFromContext(r.Context())
+	if user == nil || user.Role() != "admin" {
+		Forbidden(w)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"enabled": s.maintenance.IsEnabled(),
+			"message": s.maintenance.Message(),
+		})
+
+	case http.MethodPut:
+		var body struct {
+			Enabled *bool  `json:"enabled"`
+			Message string `json:"message"`
+		}
+		if err := readJSON(r, &body); err != nil {
+			writeError(w, http.StatusBadRequest, ErrCodeInvalidRequest, "Invalid request body", nil)
+			return
+		}
+		if body.Enabled != nil {
+			s.maintenance.SetEnabled(*body.Enabled)
+		}
+		if body.Message != "" {
+			s.maintenance.SetMessage(body.Message)
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"enabled": s.maintenance.IsEnabled(),
+			"message": s.maintenance.Message(),
+		})
+
+	default:
+		MethodNotAllowed(w)
+	}
 }
 
 // maintenancePageHTML returns a self-contained HTML maintenance page.
