@@ -278,7 +278,7 @@ func SeedAgnosticTemplate(targetDir string, force bool) error {
 		return fmt.Errorf("failed to create template directory %s: %w", targetDir, err)
 	}
 
-	return fs.WalkDir(EmbedsFS, templateBase, func(path string, d fs.DirEntry, err error) error {
+	if err := fs.WalkDir(EmbedsFS, templateBase, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -321,7 +321,12 @@ func SeedAgnosticTemplate(targetDir string, force bool) error {
 		}
 
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+
+	// Seed common files (.tmux.conf, .zshrc) from embeds/common/
+	return SeedCommonFiles(targetDir, "", force)
 }
 
 func InitProject(targetDir string, harnesses []api.Harness) error {
