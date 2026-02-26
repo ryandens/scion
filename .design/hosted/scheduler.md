@@ -795,13 +795,7 @@ All recurring handlers run immediately on startup (tick 0) because `0 % N == 0` 
 
 ---
 
-## Open Questions
-
-### 1. One-shot handler panic recovery and map cleanup ordering
-
-The `scheduleTimer` callback calls `fireEvent` (which now includes panic recovery) and then removes the timer from the in-memory map. If a panic occurs inside `fireEvent`, it is recovered and the DB status is updated, but the `delete(s.timers, evt.ID)` still executes afterward — which is correct. However, the `defer cancel()` at the top of the callback means the context is cancelled *after* the map cleanup. If `fireEvent`'s DB status update is slow and the context is cancelled by `Stop()` concurrently, the status update could be lost. In practice this is unlikely (the cancel and Stop paths are independent), but worth verifying during implementation that the ordering is sound under concurrent shutdown.
-
-### 2. `MarkStaleAgentsUndetermined` returning updated rows
+### 9. `MarkStaleAgentsUndetermined` returning updated rows
 
 The SQL shown is a plain `UPDATE` statement, but the Go method signature returns `[]Agent`. The implementation will need SQLite's `RETURNING *` clause (available since SQLite 3.35.0, 2021) or a two-step SELECT-then-UPDATE approach. The `RETURNING` clause is preferred for atomicity. Worth confirming the project's minimum SQLite version supports it.
 
