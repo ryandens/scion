@@ -2995,7 +2995,7 @@ export function getSessionConfig(): SessionConfig {
 
 ### 13.4 Debug Mode
 
-When `SCION_API_DEBUG=true`, the web frontend enables:
+When `SCION_DEBUG=true`, the web frontend enables:
 
 1. **Debug Logging:** Detailed console output for session, auth, and API proxy middleware
 2. **Debug Panel:** A UI component (`scion-debug-panel`) that displays:
