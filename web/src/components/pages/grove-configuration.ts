@@ -60,7 +60,7 @@ export class ScionPageGroveConfiguration extends LitElement {
   @state() private envDialogDescription = '';
   @state() private envDialogSensitive = false;
   @state() private envDialogSecret = false;
-  @state() private envDialogInjectionMode: InjectionMode = 'always';
+  @state() private envDialogInjectionMode: InjectionMode = 'as_needed';
   @state() private envDialogLoading = false;
   @state() private envDialogError: string | null = null;
   @state() private envDeletingKey: string | null = null;
@@ -78,7 +78,7 @@ export class ScionPageGroveConfiguration extends LitElement {
   @state() private secretDialogDescription = '';
   @state() private secretDialogType: SecretType = 'environment';
   @state() private secretDialogTarget = '';
-  @state() private secretDialogInjectionMode: InjectionMode = 'always';
+  @state() private secretDialogInjectionMode: InjectionMode = 'as_needed';
   @state() private secretDialogLoading = false;
   @state() private secretDialogError: string | null = null;
   @state() private secretDeletingKey: string | null = null;
@@ -566,7 +566,7 @@ export class ScionPageGroveConfiguration extends LitElement {
     this.envDialogDescription = '';
     this.envDialogSensitive = false;
     this.envDialogSecret = false;
-    this.envDialogInjectionMode = 'always';
+    this.envDialogInjectionMode = 'as_needed';
     this.envDialogError = null;
     this.envDialogOpen = true;
   }
@@ -578,7 +578,7 @@ export class ScionPageGroveConfiguration extends LitElement {
     this.envDialogDescription = envVar.description || '';
     this.envDialogSensitive = envVar.sensitive;
     this.envDialogSecret = envVar.secret;
-    this.envDialogInjectionMode = envVar.injectionMode || 'always';
+    this.envDialogInjectionMode = envVar.injectionMode || 'as_needed';
     this.envDialogError = null;
     this.envDialogOpen = true;
   }
@@ -695,7 +695,7 @@ export class ScionPageGroveConfiguration extends LitElement {
     this.secretDialogDescription = '';
     this.secretDialogType = 'environment';
     this.secretDialogTarget = '';
-    this.secretDialogInjectionMode = 'always';
+    this.secretDialogInjectionMode = 'as_needed';
     this.secretDialogError = null;
     this.secretDialogOpen = true;
   }
@@ -707,7 +707,7 @@ export class ScionPageGroveConfiguration extends LitElement {
     this.secretDialogDescription = secret.description || '';
     this.secretDialogType = secret.type;
     this.secretDialogTarget = secret.target || '';
-    this.secretDialogInjectionMode = secret.injectionMode || 'always';
+    this.secretDialogInjectionMode = secret.injectionMode || 'as_needed';
     this.secretDialogError = null;
     this.secretDialogOpen = true;
   }

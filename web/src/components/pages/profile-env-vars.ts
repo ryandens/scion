@@ -40,7 +40,7 @@ export class ScionPageProfileEnvVars extends LitElement {
   @state() private dialogDescription = '';
   @state() private dialogSensitive = false;
   @state() private dialogSecret = false;
-  @state() private dialogInjectionMode: InjectionMode = 'always';
+  @state() private dialogInjectionMode: InjectionMode = 'as_needed';
   @state() private dialogLoading = false;
   @state() private dialogError: string | null = null;
 
@@ -365,7 +365,7 @@ export class ScionPageProfileEnvVars extends LitElement {
     this.dialogDescription = '';
     this.dialogSensitive = false;
     this.dialogSecret = false;
-    this.dialogInjectionMode = 'always';
+    this.dialogInjectionMode = 'as_needed';
     this.dialogError = null;
     this.dialogOpen = true;
   }
@@ -377,7 +377,7 @@ export class ScionPageProfileEnvVars extends LitElement {
     this.dialogDescription = envVar.description || '';
     this.dialogSensitive = envVar.sensitive;
     this.dialogSecret = envVar.secret;
-    this.dialogInjectionMode = envVar.injectionMode || 'always';
+    this.dialogInjectionMode = envVar.injectionMode || 'as_needed';
     this.dialogError = null;
     this.dialogOpen = true;
   }

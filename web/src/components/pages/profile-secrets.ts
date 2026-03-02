@@ -40,7 +40,7 @@ export class ScionPageProfileSecrets extends LitElement {
   @state() private dialogDescription = '';
   @state() private dialogType: SecretType = 'environment';
   @state() private dialogTarget = '';
-  @state() private dialogInjectionMode: InjectionMode = 'always';
+  @state() private dialogInjectionMode: InjectionMode = 'as_needed';
   @state() private dialogLoading = false;
   @state() private dialogError: string | null = null;
 
@@ -384,7 +384,7 @@ export class ScionPageProfileSecrets extends LitElement {
     this.dialogDescription = '';
     this.dialogType = 'environment';
     this.dialogTarget = '';
-    this.dialogInjectionMode = 'always';
+    this.dialogInjectionMode = 'as_needed';
     this.dialogError = null;
     this.dialogOpen = true;
   }
@@ -396,7 +396,7 @@ export class ScionPageProfileSecrets extends LitElement {
     this.dialogDescription = secret.description || '';
     this.dialogType = secret.type;
     this.dialogTarget = secret.target || '';
-    this.dialogInjectionMode = secret.injectionMode || 'always';
+    this.dialogInjectionMode = secret.injectionMode || 'as_needed';
     this.dialogError = null;
     this.dialogOpen = true;
   }
