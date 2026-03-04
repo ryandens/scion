@@ -21,6 +21,7 @@ import (
 )
 
 type MockRuntime struct {
+	NameFunc             func() string
 	RunFunc              func(ctx context.Context, config RunConfig) (string, error)
 	StopFunc             func(ctx context.Context, id string) error
 	DeleteFunc           func(ctx context.Context, id string) error
@@ -34,6 +35,9 @@ type MockRuntime struct {
 }
 
 func (m *MockRuntime) Name() string {
+	if m.NameFunc != nil {
+		return m.NameFunc()
+	}
 	return "mock"
 }
 

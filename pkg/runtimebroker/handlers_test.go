@@ -1266,6 +1266,68 @@ hub:
 			t.Errorf("expected SCION_HUB_ENDPOINT='https://hub.public.com' from request, got %q", got)
 		}
 	})
+
+	t.Run("non-localhost endpoint is not overridden by container endpoint", func(t *testing.T) {
+		cfg := DefaultServerConfig()
+		cfg.BrokerID = "test-broker-id"
+		cfg.BrokerName = "test-host"
+		cfg.ContainerHubEndpoint = "http://host.containers.internal:8080"
+
+		mgr := &envCapturingManager{}
+		rt := &runtime.MockRuntime{}
+		srv := New(cfg, mgr, rt)
+
+		body := `{
+			"name": "test-agent",
+			"hubEndpoint": "https://hub.example.com"
+		}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/agents", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		srv.Handler().ServeHTTP(w, req)
+
+		if w.Code != http.StatusCreated {
+			t.Fatalf("expected status %d, got %d: %s", http.StatusCreated, w.Code, w.Body.String())
+		}
+
+		// Non-localhost endpoint should NOT be overridden by ContainerHubEndpoint
+		if got := mgr.lastEnv["SCION_HUB_ENDPOINT"]; got != "https://hub.example.com" {
+			t.Errorf("expected SCION_HUB_ENDPOINT='https://hub.example.com' (non-localhost preserved), got %q", got)
+		}
+	})
+
+	t.Run("kubernetes runtime skips container endpoint override", func(t *testing.T) {
+		cfg := DefaultServerConfig()
+		cfg.BrokerID = "test-broker-id"
+		cfg.BrokerName = "test-host"
+		cfg.ContainerHubEndpoint = "http://host.containers.internal:8080"
+
+		mgr := &envCapturingManager{}
+		rt := &runtime.MockRuntime{
+			NameFunc: func() string { return "kubernetes" },
+		}
+		srv := New(cfg, mgr, rt)
+
+		body := `{
+			"name": "test-agent",
+			"hubEndpoint": "http://localhost:8080"
+		}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/agents", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		srv.Handler().ServeHTTP(w, req)
+
+		if w.Code != http.StatusCreated {
+			t.Fatalf("expected status %d, got %d: %s", http.StatusCreated, w.Code, w.Body.String())
+		}
+
+		// Kubernetes runtime should NOT use bridge address
+		if got := mgr.lastEnv["SCION_HUB_ENDPOINT"]; got != "http://localhost:8080" {
+			t.Errorf("expected SCION_HUB_ENDPOINT='http://localhost:8080' (k8s skips bridge), got %q", got)
+		}
+	})
 }
 
 // gitCloneCapturingManager captures env and GitClone from Start options.
@@ -2014,5 +2076,33 @@ func TestDeleteGrove_PathTraversal_Blocked(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("expected 400 for path traversal attempt, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestIsLocalhostEndpoint(t *testing.T) {
+	tests := []struct {
+		endpoint string
+		want     bool
+	}{
+		{"http://localhost:8080", true},
+		{"https://localhost:443", true},
+		{"http://localhost", true},
+		{"http://127.0.0.1:8080", true},
+		{"http://127.0.0.1", true},
+		{"http://[::1]:8080", true},
+		{"http://[::1]", true},
+		{"https://hub.example.com", false},
+		{"https://hub.example.com:8080", false},
+		{"http://host.containers.internal:8080", false},
+		{"http://192.168.1.100:8080", false},
+		{"", false},
+		{"not-a-url", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.endpoint, func(t *testing.T) {
+			if got := isLocalhostEndpoint(tt.endpoint); got != tt.want {
+				t.Errorf("isLocalhostEndpoint(%q) = %v, want %v", tt.endpoint, got, tt.want)
+			}
+		})
 	}
 }

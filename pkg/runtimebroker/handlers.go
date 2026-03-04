@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -337,11 +338,12 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 			s.agentLifecycleLog.Debug("Using server Hub endpoint as fallback", "endpoint", hubEndpoint)
 		}
 	}
-	// Apply ContainerHubEndpoint override. When configured, this replaces the
-	// dispatcher/broker endpoint with a container-accessible address. This is
-	// needed for local development where the Hub runs on localhost but agents
-	// inside containers must use a bridge address like host.containers.internal.
-	if s.config.ContainerHubEndpoint != "" {
+	// Apply ContainerHubEndpoint override only when the resolved endpoint is a
+	// localhost address (which containers cannot reach directly) and the runtime
+	// is not Kubernetes (where pods have their own networking and bridge addresses
+	// like host.containers.internal do not apply).
+	if s.config.ContainerHubEndpoint != "" && isLocalhostEndpoint(hubEndpoint) &&
+		(s.runtime == nil || s.runtime.Name() != "kubernetes") {
 		hubEndpoint = s.config.ContainerHubEndpoint
 		if s.config.Debug {
 			s.agentLifecycleLog.Debug("Hub endpoint overridden by ContainerHubEndpoint", "endpoint", hubEndpoint)
@@ -924,14 +926,15 @@ func (s *Server) startAgent(w http.ResponseWriter, r *http.Request, id string) {
 		opts.Env = make(map[string]string)
 	}
 	// Hub endpoint resolution — same priority chain as createAgent:
-	// 1. Request's HubEndpoint (from Hub dispatcher) / Broker config fallback
-	// 2. ContainerHubEndpoint override (container-accessible address)
+	// 1. Broker config HubEndpoint (fallback)
+	// 2. ContainerHubEndpoint override (only for localhost endpoints on non-k8s runtimes)
 	// 3. Grove settings hub.endpoint (highest priority)
 	hubEndpoint := ""
 	if s.config.HubEndpoint != "" {
 		hubEndpoint = s.config.HubEndpoint
 	}
-	if s.config.ContainerHubEndpoint != "" {
+	if s.config.ContainerHubEndpoint != "" && isLocalhostEndpoint(hubEndpoint) &&
+		(s.runtime == nil || s.runtime.Name() != "kubernetes") {
 		hubEndpoint = s.config.ContainerHubEndpoint
 	}
 	// Override with grove settings if available. The grove's hub.endpoint
@@ -1700,4 +1703,18 @@ func (s *Server) deleteGrove(w http.ResponseWriter, r *http.Request, slug string
 
 	s.agentLifecycleLog.Info("Removed hub-native grove directory", "slug", slug, "path", grovePath)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// isLocalhostEndpoint returns true if the given endpoint URL refers to a
+// loopback address (localhost, 127.0.0.1, [::1], etc.). This is used to
+// decide whether the ContainerHubEndpoint bridge address should be
+// substituted — containers can reach external hosts directly but need a
+// bridge address to reach services on the host's loopback interface.
+func isLocalhostEndpoint(endpoint string) bool {
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return false
+	}
+	host := u.Hostname()
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
 }
