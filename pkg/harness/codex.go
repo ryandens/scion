@@ -23,7 +23,6 @@ import (
 
 	"github.com/ptone/scion-agent/pkg/api"
 	codexEmbeds "github.com/ptone/scion-agent/pkg/harness/codex"
-	"github.com/ptone/scion-agent/pkg/util"
 )
 
 type Codex struct{}
@@ -44,14 +43,7 @@ func (c *Codex) DiscoverAuth(agentHome string) api.AuthConfig {
 }
 
 func (c *Codex) GetEnv(agentName string, agentHome string, unixUsername string, auth api.AuthConfig) map[string]string {
-	env := make(map[string]string)
-	if auth.OpenAIAPIKey != "" {
-		env["OPENAI_API_KEY"] = auth.OpenAIAPIKey
-	}
-	if auth.CodexAPIKey != "" {
-		env["CODEX_API_KEY"] = auth.CodexAPIKey
-	}
-	return env
+	return map[string]string{}
 }
 
 func (c *Codex) GetCommand(task string, resume bool, baseArgs []string) []string {
@@ -69,20 +61,6 @@ func (c *Codex) GetCommand(task string, resume bool, baseArgs []string) []string
 }
 
 func (c *Codex) PropagateFiles(homeDir, unixUsername string, auth api.AuthConfig) error {
-	if auth.CodexAuthFile != "" {
-		dst := filepath.Join(homeDir, ".codex", "auth.json")
-		// Check if it already exists in the template/agent home
-		if _, err := os.Stat(dst); err == nil {
-			return nil
-		}
-
-		if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
-			return err
-		}
-		if err := util.CopyFile(auth.CodexAuthFile, dst); err != nil {
-			return fmt.Errorf("failed to copy codex auth file: %w", err)
-		}
-	}
 	return nil
 }
 

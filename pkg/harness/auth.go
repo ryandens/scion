@@ -15,10 +15,12 @@
 package harness
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 
 	"github.com/ptone/scion-agent/pkg/api"
+	"github.com/ptone/scion-agent/pkg/config"
 	"github.com/ptone/scion-agent/pkg/util"
 )
 
@@ -74,4 +76,51 @@ func GatherAuth() api.AuthConfig {
 	}
 
 	return auth
+}
+
+// OverlaySettings applies settings-based overrides to an AuthConfig.
+// Currently this handles Gemini's SelectedType from scion-agent.json,
+// agent settings, and host settings. For non-Gemini harnesses this is a no-op.
+func OverlaySettings(auth *api.AuthConfig, h api.Harness, agentHome string) {
+	g, ok := h.(*GeminiCLI)
+	if !ok {
+		return
+	}
+
+	selectedType := ""
+
+	// 1. Check scion-agent.json for gemini.authSelectedType
+	scionAgentPath := filepath.Join(filepath.Dir(agentHome), "scion-agent.json")
+	if data, err := os.ReadFile(scionAgentPath); err == nil {
+		var cfg api.ScionConfig
+		if err := json.Unmarshal(data, &cfg); err == nil {
+			if cfg.Gemini != nil {
+				selectedType = cfg.Gemini.AuthSelectedType
+			}
+		}
+	}
+
+	// 2. Check agent settings
+	agentSettingsPath := filepath.Join(agentHome, g.DefaultConfigDir(), "settings.json")
+	if agentSettings, err := config.LoadAgentSettings(agentSettingsPath); err == nil {
+		if selectedType == "" {
+			selectedType = agentSettings.Security.Auth.SelectedType
+		}
+		if auth.GeminiAPIKey == "" && auth.GoogleAPIKey == "" {
+			auth.GeminiAPIKey = agentSettings.ApiKey
+		}
+	}
+
+	// 3. Check host settings for fallbacks
+	hostSettings, _ := config.GetAgentSettings()
+	if hostSettings != nil {
+		if selectedType == "" {
+			selectedType = hostSettings.Security.Auth.SelectedType
+		}
+		if auth.GeminiAPIKey == "" && auth.GoogleAPIKey == "" {
+			auth.GeminiAPIKey = hostSettings.ApiKey
+		}
+	}
+
+	auth.SelectedType = selectedType
 }

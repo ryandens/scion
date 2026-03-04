@@ -48,51 +48,41 @@ func TestCodexAuthPropagation(t *testing.T) {
 
 	c := &Codex{}
 	agentHome := filepath.Join(tmpHome, "agent-home")
-	
+
 	// Discover Auth
 	auth := c.DiscoverAuth(agentHome)
 	if auth.CodexAuthFile != authPath {
 		t.Errorf("expected CodexAuthFile to be %s, got %s", authPath, auth.CodexAuthFile)
 	}
 
-	// Propagate Files
+	// PropagateFiles is now a no-op (auth files handled by ResolvedAuth)
 	if err := c.PropagateFiles(agentHome, "user", auth); err != nil {
 		t.Fatalf("PropagateFiles failed: %v", err)
 	}
 
-	// Verify file was copied
-	dstPath := filepath.Join(agentHome, ".codex", "auth.json")
-	if _, err := os.Stat(dstPath); err != nil {
-		t.Errorf("expected auth file to be copied to %s", dstPath)
-	}
-	data, err := os.ReadFile(dstPath)
+	// Verify ResolveAuth correctly maps the file
+	result, err := c.ResolveAuth(auth)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("ResolveAuth failed: %v", err)
 	}
-	if string(data) != `{"token":"secret"}` {
-		t.Errorf("unexpected content in copied auth file")
+	if result.Method != "codex-auth-file" {
+		t.Errorf("Method = %q, want %q", result.Method, "codex-auth-file")
+	}
+	if len(result.Files) != 1 {
+		t.Fatalf("expected 1 file mapping, got %d", len(result.Files))
+	}
+	if result.Files[0].SourcePath != authPath {
+		t.Errorf("SourcePath = %q, want %q", result.Files[0].SourcePath, authPath)
 	}
 }
 
 func TestCodexGetEnv(t *testing.T) {
 	c := &Codex{}
 
-	// Test OPENAI_API_KEY from AuthConfig
-	env := c.GetEnv("test-agent", "/tmp", "user", api.AuthConfig{OpenAIAPIKey: "test-key"})
-	if env["OPENAI_API_KEY"] != "test-key" {
-		t.Errorf("expected OPENAI_API_KEY to be 'test-key', got '%s'", env["OPENAI_API_KEY"])
-	}
-
-	// Test CODEX_API_KEY from AuthConfig
-	env = c.GetEnv("test-agent", "/tmp", "user", api.AuthConfig{CodexAPIKey: "codex-key"})
-	if env["CODEX_API_KEY"] != "codex-key" {
-		t.Errorf("expected CODEX_API_KEY to be 'codex-key', got '%s'", env["CODEX_API_KEY"])
-	}
-
-	// Test empty AuthConfig produces no env
-	env = c.GetEnv("test-agent", "/tmp", "user", api.AuthConfig{})
+	// GetEnv should return empty map (auth handled by ResolvedAuth)
+	env := c.GetEnv("test-agent", "/tmp", "user", api.AuthConfig{OpenAIAPIKey: "test-key", CodexAPIKey: "codex-key"})
 	if len(env) != 0 {
-		t.Errorf("expected empty env for empty AuthConfig, got %v", env)
+		t.Errorf("expected empty env (auth handled by ResolvedAuth), got %v", env)
 	}
 }
 

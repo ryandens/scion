@@ -209,17 +209,21 @@ func buildCommonRunArgs(config RunConfig) ([]string, error) {
 
 	// Use Harness for file propagation and env
 	if config.Harness != nil {
+		// Apply resolved auth (env vars + files) from the new auth pipeline
+		if config.ResolvedAuth != nil {
+			if err := applyResolvedAuth(config, addEnv, addVolume, registerMount); err != nil {
+				return nil, err
+			}
+		}
+		// Call GetEnv for non-auth env vars (system prompt, agent name, etc.)
+		for k, v := range config.Harness.GetEnv(config.Name, config.HomeDir, config.UnixUsername, config.Auth) {
+			addEnv(k, v)
+		}
+		// Call PropagateFiles for non-auth file ops (settings.json overlay)
 		if config.HomeDir != "" {
 			if err := config.Harness.PropagateFiles(config.HomeDir, config.UnixUsername, config.Auth); err != nil {
 				return nil, err
 			}
-		} else {
-			for _, v := range config.Harness.GetVolumes(config.UnixUsername, config.Auth) {
-				addVolume(v)
-			}
-		}
-		for k, v := range config.Harness.GetEnv(config.Name, config.HomeDir, config.UnixUsername, config.Auth) {
-			addEnv(k, v)
 		}
 		if config.TelemetryEnabled {
 			for k, v := range config.Harness.GetTelemetryEnv() {
@@ -388,6 +392,47 @@ func expandTildeTarget(target, containerHome string) string {
 		return filepath.Join(containerHome, target[2:])
 	}
 	return target
+}
+
+// applyResolvedAuth injects ResolvedAuth env vars and files into the container
+// args. For files, it either copies into HomeDir (file copy mode) or registers
+// a read-only bind mount (volume mount mode).
+func applyResolvedAuth(config RunConfig, addEnv func(string, string), addVolume func(api.VolumeMount), registerMount func(string, string, bool, bool)) error {
+	ra := config.ResolvedAuth
+
+	// Inject env vars
+	for k, v := range ra.EnvVars {
+		addEnv(k, v)
+	}
+
+	// Inject files
+	containerHome := util.GetHomeDir(config.UnixUsername)
+	for _, f := range ra.Files {
+		containerPath := expandTildeTarget(f.ContainerPath, containerHome)
+
+		if config.HomeDir != "" {
+			// File copy mode: copy SourcePath into HomeDir at the relative
+			// path derived from containerPath within the container home.
+			var relPath string
+			if strings.HasPrefix(containerPath, containerHome+"/") {
+				relPath = strings.TrimPrefix(containerPath, containerHome+"/")
+			} else {
+				relPath = strings.TrimPrefix(containerPath, "/")
+			}
+			dst := filepath.Join(config.HomeDir, relPath)
+			if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+				return fmt.Errorf("failed to create directory for auth file %s: %w", dst, err)
+			}
+			if err := util.CopyFile(f.SourcePath, dst); err != nil {
+				return fmt.Errorf("failed to copy auth file %s → %s: %w", f.SourcePath, dst, err)
+			}
+		} else {
+			// Volume mount mode: register a read-only bind mount
+			registerMount(f.SourcePath, containerPath, true, false)
+		}
+	}
+
+	return nil
 }
 
 // writeFileSecrets writes file-type secrets to a staging directory and returns

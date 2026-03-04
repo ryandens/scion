@@ -593,8 +593,32 @@ func (r *KubernetesRuntime) buildPod(namespace string, config RunConfig) *corev1
 				})
 			}
 		}
+	} else if config.ResolvedAuth != nil {
+		// New auth pipeline: inject ResolvedAuth env vars and file mounts
+		for k, v := range config.ResolvedAuth.EnvVars {
+			envVars = append(envVars, corev1.EnvVar{Name: k, Value: v})
+		}
+		containerHome := fmt.Sprintf("/home/%s", config.UnixUsername)
+		for _, f := range config.ResolvedAuth.Files {
+			target := expandTildeTarget(f.ContainerPath, containerHome)
+			// Create a host-path volume for each auth file
+			volName := fmt.Sprintf("auth-file-%d", len(extraVolumes))
+			extraVolumes = append(extraVolumes, corev1.Volume{
+				Name: volName,
+				VolumeSource: corev1.VolumeSource{
+					HostPath: &corev1.HostPathVolumeSource{
+						Path: f.SourcePath,
+					},
+				},
+			})
+			extraVolumeMounts = append(extraVolumeMounts, corev1.VolumeMount{
+				Name:      volName,
+				MountPath: target,
+				ReadOnly:  true,
+			})
+		}
 	} else if config.Auth.GeminiAPIKey != "" || config.Auth.AnthropicAPIKey != "" || config.Auth.GoogleAPIKey != "" {
-		// Backward-compatible M1 auth fallback (only when no ResolvedSecrets)
+		// Backward-compatible M1 auth fallback (only when no ResolvedSecrets or ResolvedAuth)
 		if config.Auth.GeminiAPIKey != "" {
 			envVars = append(envVars, corev1.EnvVar{Name: "GEMINI_API_KEY", Value: config.Auth.GeminiAPIKey})
 		}

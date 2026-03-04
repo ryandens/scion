@@ -100,42 +100,6 @@ func (g *GeminiCLI) GetEnv(agentName string, agentHome string, unixUsername stri
 		env["GEMINI_SYSTEM_MD"] = fullPath
 	}
 
-	if auth.GeminiAPIKey != "" {
-		env["GEMINI_API_KEY"] = auth.GeminiAPIKey
-	}
-	if auth.GoogleAPIKey != "" {
-		env["GOOGLE_API_KEY"] = auth.GoogleAPIKey
-	}
-	if auth.SelectedType != "" {
-		switch auth.SelectedType {
-		case "gemini-api-key":
-			env["GEMINI_DEFAULT_AUTH_TYPE"] = "gemini-api-key"
-		case "vertex-ai":
-			env["GEMINI_DEFAULT_AUTH_TYPE"] = "vertex-ai"
-		case "oauth-personal":
-			env["GEMINI_DEFAULT_AUTH_TYPE"] = "oauth-personal"
-		}
-	} else {
-		// Legacy/Fallback behavior when SelectedType is not explicitly set
-		if auth.GeminiAPIKey != "" || auth.GoogleAPIKey != "" {
-			env["GEMINI_DEFAULT_AUTH_TYPE"] = "gemini-api-key"
-		}
-	}
-
-	if auth.GoogleCloudProject != "" {
-		env["GOOGLE_CLOUD_PROJECT"] = auth.GoogleCloudProject
-	}
-
-	if auth.GoogleAppCredentials != "" {
-		env["GEMINI_DEFAULT_AUTH_TYPE"] = "compute-default-credentials"
-		// The path is fixed in PropagateFiles
-		env["GOOGLE_APPLICATION_CREDENTIALS"] = fmt.Sprintf("%s/.config/gcp/application_default_credentials.json", util.GetHomeDir(unixUsername))
-	}
-
-	if auth.OAuthCreds != "" {
-		env["GEMINI_DEFAULT_AUTH_TYPE"] = "oauth-personal"
-	}
-
 	return env
 }
 
@@ -156,6 +120,7 @@ func (g *GeminiCLI) PropagateFiles(homeDir, unixUsername string, auth api.AuthCo
 		return nil
 	}
 
+	// Update settings.json with the selected auth type (non-auth settings overlay)
 	if auth.SelectedType != "" {
 		geminiSettingsPath := filepath.Join(homeDir, g.DefaultConfigDir(), "settings.json")
 		if err := g.updateSelectedAuthType(geminiSettingsPath, auth.SelectedType); err != nil {
@@ -163,46 +128,11 @@ func (g *GeminiCLI) PropagateFiles(homeDir, unixUsername string, auth api.AuthCo
 		}
 	}
 
-	if auth.OAuthCreds != "" {
-		dst := filepath.Join(homeDir, g.DefaultConfigDir(), "oauth_creds.json")
-		if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
-			return err
-		}
-		if err := util.CopyFile(auth.OAuthCreds, dst); err != nil {
-			return fmt.Errorf("failed to copy oauth creds: %w", err)
-		}
-	}
-
-	if auth.GoogleAppCredentials != "" {
-		dst := filepath.Join(homeDir, ".config", "gcp", "application_default_credentials.json")
-		if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
-			return err
-		}
-		if err := util.CopyFile(auth.GoogleAppCredentials, dst); err != nil {
-			return fmt.Errorf("failed to copy application default credentials: %w", err)
-		}
-	}
-
 	return nil
 }
 
 func (g *GeminiCLI) GetVolumes(unixUsername string, auth api.AuthConfig) []api.VolumeMount {
-	var volumes []api.VolumeMount
-	if auth.OAuthCreds != "" {
-		volumes = append(volumes, api.VolumeMount{
-			Source:   auth.OAuthCreds,
-			Target:   fmt.Sprintf("%s/%s/oauth_creds.json", util.GetHomeDir(unixUsername), g.DefaultConfigDir()),
-			ReadOnly: true,
-		})
-	}
-	if auth.GoogleAppCredentials != "" {
-		volumes = append(volumes, api.VolumeMount{
-			Source:   auth.GoogleAppCredentials,
-			Target:   fmt.Sprintf("%s/.config/gcp/application_default_credentials.json", util.GetHomeDir(unixUsername)),
-			ReadOnly: true,
-		})
-	}
-	return volumes
+	return nil
 }
 
 func (g *GeminiCLI) DefaultConfigDir() string {

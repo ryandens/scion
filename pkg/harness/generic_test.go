@@ -58,16 +58,14 @@ func TestGeneric_GetEnv(t *testing.T) {
 
 	env := g.GetEnv("test-agent", "", "test-user", auth)
 
-	expectedEnv := map[string]string{
-		"SCION_AGENT_NAME":             "test-agent",
-		"GEMINI_API_KEY":               "test-gemini-key",
-		"ANTHROPIC_API_KEY":            "test-anthropic-key",
-		"GOOGLE_APPLICATION_CREDENTIALS": "/home/test-user/.config/gcp/application_default_credentials.json",
+	// GetEnv should only return non-auth env vars
+	if env["SCION_AGENT_NAME"] != "test-agent" {
+		t.Errorf("Expected SCION_AGENT_NAME = 'test-agent', got '%s'", env["SCION_AGENT_NAME"])
 	}
-
-	for k, v := range expectedEnv {
-		if env[k] != v {
-			t.Errorf("Expected env[%s] = '%s', got '%s'", k, v, env[k])
+	// Auth env vars should NOT be present (handled by ResolvedAuth)
+	for _, key := range []string{"GEMINI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_APPLICATION_CREDENTIALS", "GOOGLE_CLOUD_PROJECT"} {
+		if _, ok := env[key]; ok {
+			t.Errorf("Expected env[%s] to be absent (auth handled by ResolvedAuth), but it was present", key)
 		}
 	}
 }

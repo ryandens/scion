@@ -77,10 +77,14 @@ func TestBuildCommonRunArgs(t *testing.T) {
 		{
 			name: "gemini api key",
 			config: RunConfig{
-				Harness:      &harness.GeminiCLI{},
-				Name: "test-agent",
-				Auth: api.AuthConfig{
-					GeminiAPIKey: "sk-123",
+				Harness: &harness.GeminiCLI{},
+				Name:    "test-agent",
+				ResolvedAuth: &api.ResolvedAuth{
+					Method: "gemini-api-key",
+					EnvVars: map[string]string{
+						"GEMINI_API_KEY":          "sk-123",
+						"GEMINI_DEFAULT_AUTH_TYPE": "gemini-api-key",
+					},
 				},
 				Image: "scion-agent:latest",
 			},
@@ -110,8 +114,14 @@ func TestBuildCommonRunArgs(t *testing.T) {
 				Name:         "test-agent",
 				UnixUsername: "scion",
 				HomeDir:      tmpHome,
-				Auth: api.AuthConfig{
-					OAuthCreds: oauthFile,
+				ResolvedAuth: &api.ResolvedAuth{
+					Method: "oauth-personal",
+					EnvVars: map[string]string{
+						"GEMINI_DEFAULT_AUTH_TYPE": "oauth-personal",
+					},
+					Files: []api.FileMapping{
+						{SourcePath: oauthFile, ContainerPath: "~/.gemini/oauth_creds.json"},
+					},
 				},
 				Image: "scion-agent:latest",
 			},
@@ -123,8 +133,15 @@ func TestBuildCommonRunArgs(t *testing.T) {
 				Harness:      &harness.GeminiCLI{},
 				Name:         "test-agent",
 				UnixUsername: "scion",
-				Auth: api.AuthConfig{
-					GoogleAppCredentials: adcFile,
+				ResolvedAuth: &api.ResolvedAuth{
+					Method: "compute-default-credentials",
+					EnvVars: map[string]string{
+						"GEMINI_DEFAULT_AUTH_TYPE":      "compute-default-credentials",
+						"GOOGLE_APPLICATION_CREDENTIALS": "/home/scion/.config/gcp/application_default_credentials.json",
+					},
+					Files: []api.FileMapping{
+						{SourcePath: adcFile, ContainerPath: "~/.config/gcp/application_default_credentials.json"},
+					},
 				},
 				Image: "scion-agent:latest",
 			},
@@ -137,11 +154,15 @@ func TestBuildCommonRunArgs(t *testing.T) {
 		{
 			name: "other auth and model",
 			config: RunConfig{
-				Harness:      &harness.GeminiCLI{},
-				Name: "test-agent",
-				Auth: api.AuthConfig{
-					GoogleAPIKey:       "google-123",
-					GoogleCloudProject: "my-project",
+				Harness: &harness.GeminiCLI{},
+				Name:    "test-agent",
+				ResolvedAuth: &api.ResolvedAuth{
+					Method: "gemini-api-key",
+					EnvVars: map[string]string{
+						"GOOGLE_API_KEY":           "google-123",
+						"GOOGLE_CLOUD_PROJECT":     "my-project",
+						"GEMINI_DEFAULT_AUTH_TYPE":  "gemini-api-key",
+					},
 				},
 				Env:   []string{"GEMINI_MODEL=gemini-1.5-pro"},
 				Image: "scion-agent:latest",
@@ -198,8 +219,14 @@ func TestBuildCommonRunArgs(t *testing.T) {
 				Harness:      &harness.GeminiCLI{},
 				Name:         "test-agent",
 				UnixUsername: "scion",
-				Auth: api.AuthConfig{
-					OAuthCreds: oauthFile,
+				ResolvedAuth: &api.ResolvedAuth{
+					Method: "oauth-personal",
+					EnvVars: map[string]string{
+						"GEMINI_DEFAULT_AUTH_TYPE": "oauth-personal",
+					},
+					Files: []api.FileMapping{
+						{SourcePath: oauthFile, ContainerPath: "~/.gemini/oauth_creds.json"},
+					},
 				},
 				Image: "scion-agent:latest",
 			},

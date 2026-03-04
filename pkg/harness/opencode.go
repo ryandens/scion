@@ -23,7 +23,6 @@ import (
 
 	"github.com/ptone/scion-agent/pkg/api"
 	opencodeEmbeds "github.com/ptone/scion-agent/pkg/harness/opencode"
-	"github.com/ptone/scion-agent/pkg/util"
 )
 
 type OpenCode struct{}
@@ -46,14 +45,7 @@ func (o *OpenCode) DiscoverAuth(agentHome string) api.AuthConfig {
 }
 
 func (o *OpenCode) GetEnv(agentName string, agentHome string, unixUsername string, auth api.AuthConfig) map[string]string {
-	env := make(map[string]string)
-	if auth.AnthropicAPIKey != "" {
-		env["ANTHROPIC_API_KEY"] = auth.AnthropicAPIKey
-	}
-	if auth.OpenAIAPIKey != "" {
-		env["OPENAI_API_KEY"] = auth.OpenAIAPIKey
-	}
-	return env
+	return map[string]string{}
 }
 
 func (o *OpenCode) GetCommand(task string, resume bool, baseArgs []string) []string {
@@ -71,20 +63,6 @@ func (o *OpenCode) GetCommand(task string, resume bool, baseArgs []string) []str
 	return args
 }
 func (o *OpenCode) PropagateFiles(homeDir, unixUsername string, auth api.AuthConfig) error {
-	if auth.OpenCodeAuthFile != "" {
-		dst := filepath.Join(homeDir, ".local", "share", "opencode", "auth.json")
-		// Check if it already exists in the template/agent home
-		if _, err := os.Stat(dst); err == nil {
-			return nil
-		}
-
-		if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
-			return err
-		}
-		if err := util.CopyFile(auth.OpenCodeAuthFile, dst); err != nil {
-			return fmt.Errorf("failed to copy opencode auth file: %w", err)
-		}
-	}
 	return nil
 }
 

@@ -236,10 +236,17 @@ func (m *AgentManager) Start(ctx context.Context, opts api.StartOptions) (*api.A
 
 	h := harness.New(harnessName)
 
-	// 3. Propagate credentials
+	// 3. Resolve credentials via new auth pipeline
 	var auth api.AuthConfig
+	var resolvedAuth *api.ResolvedAuth
 	if !opts.NoAuth {
-		auth = h.DiscoverAuth(agentHome)
+		auth = harness.GatherAuth()
+		harness.OverlaySettings(&auth, h, agentHome)
+		resolved, err := h.ResolveAuth(auth)
+		if err != nil {
+			return nil, fmt.Errorf("auth resolution failed: %w", err)
+		}
+		resolvedAuth = resolved
 	}
 
 	// 4. Launch container
@@ -437,6 +444,7 @@ func (m *AgentManager) Start(ctx context.Context, opts api.StartOptions) (*api.A
 		Workspace:        effectiveWorkspace,
 		RepoRoot:         repoRoot,
 		Auth:             auth,
+		ResolvedAuth:     resolvedAuth,
 		Harness:          h,
 		TelemetryEnabled: telemetryEnabled,
 		Task: func() string {
