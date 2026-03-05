@@ -590,7 +590,7 @@ func TestGcloudMountPreCreatesDirectory(t *testing.T) {
 
 	agentHome := t.TempDir()
 
-	_, err := buildCommonRunArgs(RunConfig{
+	args, err := buildCommonRunArgs(RunConfig{
 		Harness:      &harness.GeminiCLI{},
 		Name:         "test-agent",
 		UnixUsername: "scion",
@@ -608,6 +608,48 @@ func TestGcloudMountPreCreatesDirectory(t *testing.T) {
 	}
 	if !info.IsDir() {
 		t.Fatalf("expected %s to be a directory", mountPoint)
+	}
+
+	// Verify the gcloud mount is present in the args
+	argStr := strings.Join(args, " ")
+	if !strings.Contains(argStr, ".config/gcloud") {
+		t.Errorf("expected gcloud mount in args, got: %s", argStr)
+	}
+}
+
+func TestGcloudMountSkippedInBrokerMode(t *testing.T) {
+	// In broker mode, the gcloud auto-mount should be skipped to avoid
+	// leaking the broker operator's GCP credentials into agent containers.
+	home, _ := os.UserHomeDir()
+	gcloudDir := filepath.Join(home, ".config", "gcloud")
+	if _, err := os.Stat(gcloudDir); err != nil {
+		t.Skip("host does not have ~/.config/gcloud; skipping")
+	}
+
+	agentHome := t.TempDir()
+
+	args, err := buildCommonRunArgs(RunConfig{
+		Harness:      &harness.GeminiCLI{},
+		Name:         "test-agent",
+		UnixUsername: "scion",
+		Image:        "scion-agent:latest",
+		HomeDir:      agentHome,
+		BrokerMode:   true,
+	})
+	if err != nil {
+		t.Fatalf("buildCommonRunArgs failed: %v", err)
+	}
+
+	// The mount-point directory should NOT be pre-created in broker mode
+	mountPoint := filepath.Join(agentHome, ".config", "gcloud")
+	if _, err := os.Stat(mountPoint); err == nil {
+		t.Errorf("expected %s to NOT exist in broker mode, but it does", mountPoint)
+	}
+
+	// Verify the gcloud mount is absent from the args
+	argStr := strings.Join(args, " ")
+	if strings.Contains(argStr, ".config/gcloud") {
+		t.Errorf("expected no gcloud mount in broker mode args, got: %s", argStr)
 	}
 }
 

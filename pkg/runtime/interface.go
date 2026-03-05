@@ -42,6 +42,7 @@ type RunConfig struct {
 	Resources        *api.ResourceSpec
 	Kubernetes      *api.KubernetesConfig
 	GitClone        *api.GitCloneConfig
+	BrokerMode      bool
 }
 
 type Runtime interface {

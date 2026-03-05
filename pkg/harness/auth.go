@@ -226,7 +226,7 @@ func RequiredAuthEnvKeys(harnessName, authSelectedType string) [][]string {
 		case "api-key":
 			return [][]string{{"GEMINI_API_KEY", "GOOGLE_API_KEY"}}
 		case "vertex-ai":
-			return [][]string{{"GOOGLE_CLOUD_PROJECT"}}
+			return [][]string{{"GOOGLE_CLOUD_PROJECT"}, {"GOOGLE_CLOUD_REGION"}}
 		}
 	case "opencode":
 		switch effectiveType {

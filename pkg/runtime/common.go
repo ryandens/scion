@@ -230,18 +230,22 @@ func buildCommonRunArgs(config RunConfig) ([]string, error) {
 	addEnv("SCION_HOST_UID", fmt.Sprintf("%d", os.Getuid()))
 	addEnv("SCION_HOST_GID", fmt.Sprintf("%d", os.Getgid()))
 
-	// Mount gcloud config if it exists on the host.
-	home, _ := os.UserHomeDir()
-	gcloudConfigDir := filepath.Join(home, ".config", "gcloud")
-	if _, err := os.Stat(gcloudConfigDir); err == nil {
-		// Pre-create the mount-point directory inside the agent home so that
-		// Docker does not create it as root (which would make the agent
-		// directory undeletable by a non-root broker process).
-		if config.HomeDir != "" {
-			mountPoint := filepath.Join(config.HomeDir, ".config", "gcloud")
-			_ = os.MkdirAll(mountPoint, 0755)
+	// Mount gcloud config if it exists on the host (local mode only).
+	// In broker mode, credentials are projected via ResolvedSecrets;
+	// mounting the broker operator's gcloud dir would leak credentials.
+	if !config.BrokerMode {
+		home, _ := os.UserHomeDir()
+		gcloudConfigDir := filepath.Join(home, ".config", "gcloud")
+		if _, err := os.Stat(gcloudConfigDir); err == nil {
+			// Pre-create the mount-point directory inside the agent home so that
+			// Docker does not create it as root (which would make the agent
+			// directory undeletable by a non-root broker process).
+			if config.HomeDir != "" {
+				mountPoint := filepath.Join(config.HomeDir, ".config", "gcloud")
+				_ = os.MkdirAll(mountPoint, 0755)
+			}
+			registerMount(gcloudConfigDir, fmt.Sprintf("/home/%s/.config/gcloud", config.UnixUsername), true, false)
 		}
-		registerMount(gcloudConfigDir, fmt.Sprintf("/home/%s/.config/gcloud", config.UnixUsername), true, false)
 	}
 
 	for _, e := range config.Env {

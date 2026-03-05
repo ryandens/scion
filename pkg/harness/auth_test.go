@@ -375,7 +375,7 @@ func TestRequiredAuthEnvKeys(t *testing.T) {
 		// Gemini
 		{"gemini api-key", "gemini", "api-key", [][]string{{"GEMINI_API_KEY", "GOOGLE_API_KEY"}}},
 		{"gemini auth-file", "gemini", "auth-file", nil},
-		{"gemini vertex-ai", "gemini", "vertex-ai", [][]string{{"GOOGLE_CLOUD_PROJECT"}}},
+		{"gemini vertex-ai", "gemini", "vertex-ai", [][]string{{"GOOGLE_CLOUD_PROJECT"}, {"GOOGLE_CLOUD_REGION"}}},
 
 		// OpenCode
 		{"opencode api-key", "opencode", "api-key", [][]string{{"ANTHROPIC_API_KEY", "OPENAI_API_KEY"}}},

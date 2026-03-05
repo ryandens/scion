@@ -529,8 +529,9 @@ func (m *AgentManager) Start(ctx context.Context, opts api.StartOptions) (*api.A
 			}
 			return nil
 		}(),
-		GitClone: opts.GitClone,
-		Resume:   opts.Resume,
+		GitClone:   opts.GitClone,
+		BrokerMode: opts.BrokerMode,
+		Resume:     opts.Resume,
 		Labels: map[string]string{
 			"scion.agent":          "true",
 			"scion.name":           api.Slugify(opts.Name),
