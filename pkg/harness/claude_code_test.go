@@ -165,18 +165,13 @@ func TestClaudeCode_Provision_VertexAI(t *testing.T) {
 		t.Errorf("CLOUD_ML_REGION = %q, want %q", updatedCfg.Env["CLOUD_ML_REGION"], "${GOOGLE_CLOUD_REGION}")
 	}
 
-	// Verify ADC volume mount
-	foundGcloudVol := false
+	// The gcloud volume mount must NOT be added by the harness — it is
+	// handled by buildCommonRunArgs (gated on !BrokerMode) so that broker
+	// mode does not leak the operator's credentials.
 	for _, v := range updatedCfg.Volumes {
 		if strings.Contains(v.Target, ".config/gcloud") {
-			foundGcloudVol = true
-			if !v.ReadOnly {
-				t.Error("gcloud volume should be read-only")
-			}
+			t.Error("harness should not add gcloud volume; mount is handled by buildCommonRunArgs")
 		}
-	}
-	if !foundGcloudVol {
-		t.Error("expected gcloud ADC volume mount for vertex-ai")
 	}
 }
 

@@ -127,9 +127,6 @@ func (g *GeminiCLI) Provision(ctx context.Context, agentName, agentHome, agentWo
 
 	// Update scion-agent.json
 	var envUpdates map[string]string
-	var volUpdates []api.VolumeMount
-
-	home, _ := os.UserHomeDir()
 
 	switch selectedType {
 	case "api-key":
@@ -137,15 +134,14 @@ func (g *GeminiCLI) Provision(ctx context.Context, agentName, agentHome, agentWo
 	case "auth-file":
 		envUpdates = map[string]string{"GOOGLE_CLOUD_PROJECT": "${GOOGLE_CLOUD_PROJECT}"}
 	case "vertex-ai":
+		// NOTE: gcloud credentials are mounted by buildCommonRunArgs in
+		// pkg/runtime/common.go, gated on !BrokerMode.  Do NOT add a
+		// gcloud volume here — it would bypass the broker-mode check and
+		// leak the broker operator's credentials into agent containers.
 		envUpdates = map[string]string{
 			"GOOGLE_CLOUD_PROJECT": "${GOOGLE_CLOUD_PROJECT}",
 			"GOOGLE_CLOUD_REGION":  "${GOOGLE_CLOUD_REGION}",
 		}
-		volUpdates = append(volUpdates, api.VolumeMount{
-			Source:   filepath.Join(home, ".config", "gcloud"),
-			Target:   "/home/scion/.config/gcloud",
-			ReadOnly: true,
-		})
 	}
 
 	if len(envUpdates) > 0 {
@@ -157,10 +153,6 @@ func (g *GeminiCLI) Provision(ctx context.Context, agentName, agentHome, agentWo
 				cfg.Env[k] = v
 			}
 		}
-	}
-
-	if len(volUpdates) > 0 {
-		cfg.Volumes = append(cfg.Volumes, volUpdates...)
 	}
 
 	newData, err := json.MarshalIndent(cfg, "", "  ")

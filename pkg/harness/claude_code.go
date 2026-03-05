@@ -90,25 +90,19 @@ func (c *ClaudeCode) Provision(ctx context.Context, agentName, agentHome, agentW
 	}
 
 	var envUpdates map[string]string
-	var volUpdates []api.VolumeMount
-
-	home, _ := os.UserHomeDir()
 
 	switch cfg.AuthSelectedType {
 	case "api-key":
 		envUpdates = map[string]string{"ANTHROPIC_API_KEY": "${ANTHROPIC_API_KEY}"}
 	case "vertex-ai":
+		// NOTE: gcloud credentials are mounted by buildCommonRunArgs in
+		// pkg/runtime/common.go, gated on !BrokerMode.  Do NOT add a
+		// gcloud volume here — it would bypass the broker-mode check and
+		// leak the broker operator's credentials into agent containers.
 		envUpdates = map[string]string{
 			"CLAUDE_CODE_USE_VERTEX":      "1",
 			"ANTHROPIC_VERTEX_PROJECT_ID": "${GOOGLE_CLOUD_PROJECT}",
 			"CLOUD_ML_REGION":             "${GOOGLE_CLOUD_REGION}",
-		}
-		if home != "" {
-			volUpdates = append(volUpdates, api.VolumeMount{
-				Source:   filepath.Join(home, ".config", "gcloud"),
-				Target:   "/home/scion/.config/gcloud",
-				ReadOnly: true,
-			})
 		}
 	}
 
@@ -123,11 +117,7 @@ func (c *ClaudeCode) Provision(ctx context.Context, agentName, agentHome, agentW
 		}
 	}
 
-	if len(volUpdates) > 0 {
-		cfg.Volumes = append(cfg.Volumes, volUpdates...)
-	}
-
-	if len(envUpdates) > 0 || len(volUpdates) > 0 {
+	if len(envUpdates) > 0 {
 		newData, err := json.MarshalIndent(cfg, "", "  ")
 		if err != nil {
 			return fmt.Errorf("failed to marshal updated config: %w", err)
