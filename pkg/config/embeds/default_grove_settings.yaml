@@ -1,0 +1,26 @@
+# Scion Grove Configuration (v1)
+#
+# Settings merge order: defaults -> global (~/.scion/) -> grove (.scion/)
+# Grove-level settings control per-project preferences like active profile,
+# default template, and hub connection details.
+#
+# Runtime profiles and runtimes are managed at the global/broker level
+# (~/.scion/settings.yaml) and are not defined here.
+
+schema_version: "1"
+
+# Active profile to use for this grove (profile must be defined in global settings)
+# Env: SCION_ACTIVE_PROFILE
+active_profile: local
+
+# Default harness template for new agents
+# Env: SCION_DEFAULT_TEMPLATE
+default_template: default
+
+# Default harness-config for new agents
+# Env: SCION_DEFAULT_HARNESS_CONFIG
+default_harness_config: gemini
+
+# CLI behavior settings
+cli:
+  autohelp: true

@@ -355,20 +355,15 @@ func InitProject(targetDir string, harnesses []api.Harness) error {
 	// Check if any settings file exists (YAML or JSON)
 	settingsPath := GetSettingsPath(projectDir)
 	if settingsPath == "" {
-		// Detect a functioning container runtime before seeding settings
-		detectedRuntime, err := DetectLocalRuntime()
-		if err != nil {
+		// Validate that a functioning container runtime is available
+		if _, err := DetectLocalRuntime(); err != nil {
 			return err
 		}
 
-		// Seed default YAML settings with the detected runtime
-		defaultSettings, err := getDefaultSettingsYAMLForRuntime(detectedRuntime)
+		// Seed grove-specific settings (no profiles/runtimes; those live in global settings)
+		defaultSettings, err := GetGroveDefaultSettingsYAML()
 		if err != nil {
-			// Fall back to JSON defaults
-			defaultSettings, err = getDefaultSettingsDataForRuntime(detectedRuntime)
-			if err != nil {
-				return fmt.Errorf("failed to read default settings: %w", err)
-			}
+			return fmt.Errorf("failed to read default grove settings: %w", err)
 		}
 		newSettingsPath := filepath.Join(projectDir, "settings.yaml")
 		if err := os.WriteFile(newSettingsPath, defaultSettings, 0644); err != nil {

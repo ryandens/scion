@@ -215,6 +215,13 @@ func GetDefaultSettingsDataYAML() ([]byte, error) {
 	return getDefaultSettingsYAMLForRuntime("container")
 }
 
+// GetGroveDefaultSettingsYAML returns the embedded grove-level default settings YAML.
+// Unlike the full default settings, grove settings do not include profiles or runtimes;
+// those are managed at the global/broker level (~/.scion/settings.yaml).
+func GetGroveDefaultSettingsYAML() ([]byte, error) {
+	return EmbedsFS.ReadFile("embeds/default_grove_settings.yaml")
+}
+
 // GetSettingsPath returns the path to the settings file in a directory,
 // preferring YAML over JSON. Returns empty string if no settings file exists.
 func GetSettingsPath(dir string) string {

@@ -570,23 +570,25 @@ func TestInitProject_UsesDetectedRuntime(t *testing.T) {
 		t.Fatalf("InitProject failed: %v", err)
 	}
 
-	// Read the seeded settings and verify runtime is "podman"
+	// Grove settings should not contain profiles or runtimes; those live in global settings.
 	data, err := os.ReadFile(filepath.Join(projectDir, "settings.yaml"))
 	if err != nil {
 		t.Fatalf("failed to read settings.yaml: %v", err)
 	}
 
-	var settings Settings
+	var settings VersionedSettings
 	if err := yaml.Unmarshal(data, &settings); err != nil {
 		t.Fatalf("failed to unmarshal settings: %v", err)
 	}
 
-	localProfile, ok := settings.Profiles["local"]
-	if !ok {
-		t.Fatal("local profile not found in seeded settings")
+	if len(settings.Profiles) != 0 {
+		t.Errorf("expected grove settings.yaml to have no profiles block, got %d profiles", len(settings.Profiles))
 	}
-	if localProfile.Runtime != "podman" {
-		t.Errorf("expected runtime 'podman' from detection, got %q", localProfile.Runtime)
+	if len(settings.Runtimes) != 0 {
+		t.Errorf("expected grove settings.yaml to have no runtimes block, got %d runtimes", len(settings.Runtimes))
+	}
+	if settings.ActiveProfile != "local" {
+		t.Errorf("expected active_profile 'local', got %q", settings.ActiveProfile)
 	}
 }
 
