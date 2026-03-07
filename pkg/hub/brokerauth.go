@@ -453,6 +453,11 @@ func (s *BrokerAuthService) ValidateBrokerSignature(ctx context.Context, r *http
 		return nil, errors.New("missing X-Scion-Signature header")
 	}
 
+	nonce := r.Header.Get(HeaderNonce)
+	if nonce == "" {
+		return nil, errors.New("missing X-Scion-Nonce header")
+	}
+
 	// Parse and validate timestamp
 	ts, err := strconv.ParseInt(timestamp, 10, 64)
 	if err != nil {
@@ -469,7 +474,6 @@ func (s *BrokerAuthService) ValidateBrokerSignature(ctx context.Context, r *http
 	}
 
 	// Validate nonce if enabled
-	nonce := r.Header.Get(HeaderNonce)
 	if s.nonces != nil && nonce != "" {
 		if !s.nonces.Add(nonce) {
 			return nil, errors.New("nonce already used (possible replay attack)")
@@ -701,6 +705,11 @@ func (s *BrokerAuthService) validateWithSecret(ctx context.Context, r *http.Requ
 		return nil, errors.New("missing X-Scion-Signature header")
 	}
 
+	nonce := r.Header.Get(HeaderNonce)
+	if nonce == "" {
+		return nil, errors.New("missing X-Scion-Nonce header")
+	}
+
 	// Parse and validate timestamp
 	ts, err := strconv.ParseInt(timestamp, 10, 64)
 	if err != nil {
@@ -715,9 +724,6 @@ func (s *BrokerAuthService) validateWithSecret(ctx context.Context, r *http.Requ
 	if clockSkew > s.config.MaxClockSkew {
 		return nil, fmt.Errorf("timestamp outside acceptable range (skew: %v)", clockSkew)
 	}
-
-	// Validate nonce if enabled (only check once, not per-secret)
-	nonce := r.Header.Get(HeaderNonce)
 
 	// Build canonical string and verify signature
 	canonicalString := s.buildCanonicalString(r, timestamp, nonce)

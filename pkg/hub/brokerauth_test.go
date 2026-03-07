@@ -417,6 +417,15 @@ func TestValidateBrokerSignature_MissingHeaders(t *testing.T) {
 			},
 			expectedErr: "missing X-Scion-Signature",
 		},
+		{
+			name: "missing nonce",
+			setupReq: func(r *http.Request) {
+				r.Header.Set(HeaderBrokerID, "host-id")
+				r.Header.Set(HeaderTimestamp, strconv.FormatInt(time.Now().Unix(), 10))
+				r.Header.Set(HeaderSignature, "sig")
+			},
+			expectedErr: "missing X-Scion-Nonce",
+		},
 	}
 
 	for _, tc := range tests {
@@ -432,6 +441,49 @@ func TestValidateBrokerSignature_MissingHeaders(t *testing.T) {
 				t.Errorf("Expected error containing '%s', got: %v", tc.expectedErr, err)
 			}
 		})
+	}
+}
+
+func TestValidateBrokerSignatureWithRotation_RequiresNonce(t *testing.T) {
+	svc, s := setupTestBrokerAuthService(t)
+	ctx := context.Background()
+
+	brokerID := uuid.New().String()
+	broker := &store.RuntimeBroker{
+		ID:      brokerID,
+		Name:    "rotation-host",
+		Slug:    "rotation-host",
+		Status:  store.BrokerStatusOnline,
+		Created: time.Now(),
+		Updated: time.Now(),
+	}
+	if err := s.CreateRuntimeBroker(ctx, broker); err != nil {
+		t.Fatalf("failed to create runtime broker: %v", err)
+	}
+
+	secret := &store.BrokerSecret{
+		BrokerID:  brokerID,
+		SecretKey: []byte("rotation-secret-key-32-bytes!!!"),
+		Algorithm: store.BrokerSecretAlgorithmHMACSHA256,
+		Status:    store.BrokerSecretStatusActive,
+		CreatedAt: time.Now(),
+		ExpiresAt: time.Time{},
+	}
+	if err := s.CreateBrokerSecret(ctx, secret); err != nil {
+		t.Fatalf("failed to create broker secret: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/test", nil)
+	req.Header.Set(HeaderBrokerID, brokerID)
+	req.Header.Set(HeaderTimestamp, strconv.FormatInt(time.Now().Unix(), 10))
+	req.Header.Set(HeaderSignature, "test-signature")
+
+	_, err := svc.ValidateBrokerSignatureWithRotation(ctx, req)
+	if err == nil {
+		t.Fatal("expected error for missing nonce header")
+	}
+	if !strings.Contains(err.Error(), "missing X-Scion-Nonce") {
+		t.Fatalf("expected missing nonce error, got: %v", err)
 	}
 }
 
