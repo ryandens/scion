@@ -19,6 +19,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -338,22 +339,26 @@ func buildCommonRunArgs(config RunConfig) ([]string, error) {
 	return args, nil
 }
 
+// runtimeLog is the structured logger for runtime command execution.
+var runtimeLog = slog.Default().With(slog.String("subsystem", "runtime"))
+
 func runSimpleCommand(ctx context.Context, command string, args ...string) (string, error) {
-	util.Debugf("%s %s", command, strings.Join(args, " "))
+	cmdStr := command + " " + strings.Join(args, " ")
+	runtimeLog.Debug("Executing command", "cmd", cmdStr)
 	start := time.Now()
 	cmd := exec.CommandContext(ctx, command, args...)
 	out, err := cmd.CombinedOutput()
 	elapsed := time.Since(start)
 	if err != nil {
-		util.Debugf("%s %s failed in %v", command, strings.Join(args, " "), elapsed)
+		runtimeLog.Debug("Command failed", "cmd", cmdStr, "duration", elapsed, "output", strings.TrimSpace(string(out)))
 		return string(out), fmt.Errorf("%s %s failed: %w", command, strings.Join(args, " "), err)
 	}
-	util.Debugf("%s %s completed in %v", command, strings.Join(args, " "), elapsed)
+	runtimeLog.Debug("Command completed", "cmd", cmdStr, "duration", elapsed)
 	return strings.TrimSpace(string(out)), nil
 }
 
 func runInteractiveCommand(command string, args ...string) error {
-	util.Debugf("%s %s", command, strings.Join(args, " "))
+	runtimeLog.Debug("Executing interactive command", "cmd", command+" "+strings.Join(args, " "))
 	cmd := exec.Command(command, args...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout

@@ -671,12 +671,20 @@ func (m *AgentManager) Start(ctx context.Context, opts api.StartOptions) (*api.A
 	}
 	_ = UpdateAgentConfig(opts.Name, opts.GrovePath, status, m.Runtime.Name(), profileName)
 
-	// Fetch fresh info
+	// Fetch fresh info and verify the container is actually running
 	slug := api.Slugify(opts.Name)
 	allAgents, err := m.Runtime.List(ctx, map[string]string{"scion.name": slug})
 	if err == nil {
 		for _, a := range allAgents {
 			if a.ContainerID == id || strings.EqualFold(a.Name, opts.Name) {
+				// Check if the container has already exited
+				containerStatus := strings.ToLower(a.ContainerStatus)
+				if strings.Contains(containerStatus, "exited") || strings.Contains(containerStatus, "dead") {
+					// Try to get logs for diagnosis
+					logs, _ := m.Runtime.GetLogs(ctx, id)
+					_ = m.Runtime.Delete(ctx, id)
+					return nil, fmt.Errorf("container started but exited immediately (status: %s). Container logs:\n%s", a.ContainerStatus, logs)
+				}
 				a.Detached = detached
 				a.Warnings = warnings
 				a.Phase = status
@@ -687,6 +695,8 @@ func (m *AgentManager) Start(ctx context.Context, opts api.StartOptions) (*api.A
 		}
 	}
 
+	// Container ID returned but not found in listing — it may have exited and been removed
+	warnings = append(warnings, "Container started but could not be verified as running")
 	return &api.AgentInfo{ID: id, Name: opts.Name, Phase: status, Detached: detached, Warnings: warnings, HarnessConfig: harnessConfigName, HarnessAuth: opts.HarnessAuth}, nil
 }
 

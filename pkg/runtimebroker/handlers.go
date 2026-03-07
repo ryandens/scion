@@ -1192,12 +1192,15 @@ func (s *Server) stopAgent(w http.ResponseWriter, r *http.Request, id string) {
 	ctx := r.Context()
 
 	if err := s.manager.Stop(ctx, id); err != nil {
-		if strings.Contains(err.Error(), "not found") {
-			NotFound(w, "Agent")
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "not found") || strings.Contains(errMsg, "no such") || strings.Contains(errMsg, "No such") || strings.Contains(errMsg, "exit status 125") {
+			// Container doesn't exist or podman/docker can't find it.
+			// Treat as success so the hub can update its state.
+			s.agentLifecycleLog.Warn("Stop target not found in runtime, treating as already stopped", "agent", id, "error", err)
+		} else {
+			RuntimeError(w, "Failed to stop agent: "+errMsg)
 			return
 		}
-		RuntimeError(w, "Failed to stop agent: "+err.Error())
-		return
 	}
 
 	// Send an immediate heartbeat so the hub gets the updated container status
@@ -1241,14 +1244,15 @@ func (s *Server) restartAgent(w http.ResponseWriter, r *http.Request, id string)
 		opts.Profile = agent.GetSavedProfile(id, opts.GrovePath)
 	}
 
-	// Stop then start
+	// Stop then start — tolerate missing containers since the start will recreate
 	if err := s.manager.Stop(ctx, id); err != nil {
-		if strings.Contains(err.Error(), "not found") {
-			NotFound(w, "Agent")
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "not found") || strings.Contains(errMsg, "no such") || strings.Contains(errMsg, "No such") || strings.Contains(errMsg, "exit status 125") {
+			s.agentLifecycleLog.Warn("Restart: stop target not found in runtime, proceeding with start", "agent", id, "error", err)
+		} else {
+			RuntimeError(w, "Failed to restart agent: "+errMsg)
 			return
 		}
-		RuntimeError(w, "Failed to restart agent: "+err.Error())
-		return
 	}
 
 	mgr := s.resolveManagerForOpts(opts)

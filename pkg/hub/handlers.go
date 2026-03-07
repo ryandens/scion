@@ -1259,8 +1259,9 @@ func (s *Server) performAgentDelete(w http.ResponseWriter, r *http.Request, agen
 		deleteFiles = false
 	}
 
-	// Verify broker is reachable before deleting to avoid orphaned containers
-	if !s.checkBrokerAvailability(w, r, agent) {
+	// Verify broker is reachable before deleting to avoid orphaned containers.
+	// Force mode bypasses this check so stuck agents can always be cleaned up.
+	if !force && !s.checkBrokerAvailability(w, r, agent) {
 		return
 	}
 
