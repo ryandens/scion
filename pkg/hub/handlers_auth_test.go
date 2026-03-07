@@ -19,25 +19,72 @@ package hub
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/ptone/scion-agent/pkg/store"
 )
 
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func httpJSONResponse(status int, body string) *http.Response {
+	return &http.Response{
+		StatusCode: status,
+		Status:     http.StatusText(status),
+		Header:     make(http.Header),
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+}
+
 func TestAuthLogin(t *testing.T) {
 	srv, s := testServer(t)
 	ctx := context.Background()
+	srv.oauthService = &OAuthService{
+		httpClient: &http.Client{
+			Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				if req.URL.String() != googleUserURL {
+					return httpJSONResponse(http.StatusNotFound, `{"error":"not found"}`), nil
+				}
 
-	// 1. Successful login (new user)
+				switch req.Header.Get("Authorization") {
+				case "Bearer good-token":
+					return httpJSONResponse(http.StatusOK, `{
+						"id":"google-user-1",
+						"email":"verified@example.com",
+						"verified_email":true,
+						"name":"Provider Name",
+						"picture":"https://example.com/avatar.png"
+					}`), nil
+				case "Bearer good-token-2":
+					return httpJSONResponse(http.StatusOK, `{
+						"id":"google-user-1",
+						"email":"verified@example.com",
+						"verified_email":true,
+						"name":"Provider Name 2",
+						"picture":"https://example.com/avatar2.png"
+					}`), nil
+				default:
+					return httpJSONResponse(http.StatusUnauthorized, `{"error":"invalid_token"}`), nil
+				}
+			}),
+		},
+	}
+
+	// 1. Successful login (new user). Request-supplied identity fields are ignored.
 	body := AuthLoginRequest{
 		Provider:      "google",
-		ProviderToken: "dummy-token",
-		Email:         "new@example.com",
-		Name:          "New User",
-		Avatar:        "https://example.com/avatar.png",
+		ProviderToken: "good-token",
+		Email:         "forged@example.com",
+		Name:          "Forged Name",
+		Avatar:        "https://example.com/forged.png",
 	}
 
 	rec := doRequestNoAuth(t, srv, http.MethodPost, "/api/v1/auth/login", body)
@@ -51,28 +98,28 @@ func TestAuthLogin(t *testing.T) {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 
-	if resp.User.Email != "new@example.com" {
-		t.Errorf("expected email 'new@example.com', got %q", resp.User.Email)
+	if resp.User.Email != "verified@example.com" {
+		t.Errorf("expected email 'verified@example.com', got %q", resp.User.Email)
 	}
 
 	if resp.AccessToken == "" {
 		t.Error("expected access token to be set")
 	}
 
-	// Verify user was created in store
-	user, err := s.GetUserByEmail(ctx, "new@example.com")
+	// Verify user was created from provider-verified identity, not request body.
+	user, err := s.GetUserByEmail(ctx, "verified@example.com")
 	if err != nil {
 		t.Fatalf("failed to get user from store: %v", err)
 	}
-	if user.DisplayName != "New User" {
-		t.Errorf("expected display name 'New User', got %q", user.DisplayName)
+	if user.DisplayName != "Provider Name" {
+		t.Errorf("expected display name 'Provider Name', got %q", user.DisplayName)
 	}
 
 	// 2. Successful login (existing user) - DisplayName should NOT be updated if already set
 	body2 := AuthLoginRequest{
 		Provider:      "google",
-		ProviderToken: "dummy-token-2",
-		Email:         "new@example.com",
+		ProviderToken: "good-token-2",
+		Email:         "forged2@example.com",
 		Name:          "Updated Name",
 	}
 
@@ -82,19 +129,29 @@ func TestAuthLogin(t *testing.T) {
 	}
 
 	// Verify user was NOT updated (per implementation)
-	user2, _ := s.GetUserByEmail(ctx, "new@example.com")
-	if user2.DisplayName != "New User" {
-		t.Errorf("expected display name 'New User', got %q", user2.DisplayName)
+	user2, _ := s.GetUserByEmail(ctx, "verified@example.com")
+	if user2.DisplayName != "Provider Name" {
+		t.Errorf("expected display name 'Provider Name', got %q", user2.DisplayName)
 	}
 
 	// 3. Missing fields
 	body3 := AuthLoginRequest{
 		Provider: "google",
-		// Missing Email
+		// Missing ProviderToken
 	}
 	rec3 := doRequestNoAuth(t, srv, http.MethodPost, "/api/v1/auth/login", body3)
 	if rec3.Code != http.StatusBadRequest {
 		t.Errorf("expected status 400 for missing fields, got %d", rec3.Code)
+	}
+
+	// 4. Invalid provider token
+	body4 := AuthLoginRequest{
+		Provider:      "google",
+		ProviderToken: "bad-token",
+	}
+	rec4 := doRequestNoAuth(t, srv, http.MethodPost, "/api/v1/auth/login", body4)
+	if rec4.Code != http.StatusUnauthorized {
+		t.Errorf("expected status 401 for invalid provider token, got %d: %s", rec4.Code, rec4.Body.String())
 	}
 }
 

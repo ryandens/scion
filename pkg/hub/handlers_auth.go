@@ -190,34 +190,53 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate required fields
-	if req.Provider == "" || req.Email == "" {
+	if req.Provider == "" || req.ProviderToken == "" {
 		ValidationError(w, "missing required fields", map[string]interface{}{
-			"required": []string{"provider", "email"},
+			"required": []string{"provider", "providerToken"},
 		})
 		return
 	}
 
-	// Check if user's email domain is authorized
-	if !isEmailAuthorized(req.Email, s.config.AuthorizedDomains, s.config.AdminEmails) {
+	provider := strings.ToLower(strings.TrimSpace(req.Provider))
+	if provider != "google" && provider != "github" {
+		writeError(w, http.StatusBadRequest, "invalid_provider",
+			"unsupported OAuth provider", nil)
+		return
+	}
+
+	if s.oauthService == nil {
+		writeError(w, http.StatusNotImplemented, "not_implemented",
+			"OAuth is not configured on this server", nil)
+		return
+	}
+
+	// Validate provider token with upstream provider and derive identity from
+	// verified provider response (never trust request-supplied email/profile).
+	userInfo, err := s.getDeviceFlowUserInfo(r.Context(), provider, req.ProviderToken)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "invalid_provider_token",
+			"failed to validate provider token", nil)
+		return
+	}
+
+	// Check if user's email domain is authorized.
+	if !isEmailAuthorized(userInfo.Email, s.config.AuthorizedDomains, s.config.AdminEmails) {
 		writeError(w, http.StatusForbidden, "unauthorized_domain",
 			"your email domain is not authorized", nil)
 		return
 	}
 
-	// TODO: In production, validate the provider token with the OAuth provider
-	// For now, we trust the provided information (suitable for dev mode)
-
 	// Find or create user
 	ctx := r.Context()
-	user, err := s.store.GetUserByEmail(ctx, req.Email)
+	user, err := s.store.GetUserByEmail(ctx, userInfo.Email)
 	if err != nil {
 		// Create new user
 		user = &store.User{
 			ID:          generateID(),
-			Email:       req.Email,
-			DisplayName: req.Name,
-			AvatarURL:   req.Avatar,
-			Role:        s.getUserRole(req.Email),
+			Email:       userInfo.Email,
+			DisplayName: userInfo.DisplayName,
+			AvatarURL:   userInfo.AvatarURL,
+			Role:        s.getUserRole(userInfo.Email),
 			Status:      "active",
 			Created:     time.Now(),
 			LastLogin:   time.Now(),
@@ -229,14 +248,14 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 	} else {
 		// Update last login
 		user.LastLogin = time.Now()
-		if req.Avatar != "" && user.AvatarURL == "" {
-			user.AvatarURL = req.Avatar
+		if userInfo.AvatarURL != "" && user.AvatarURL == "" {
+			user.AvatarURL = userInfo.AvatarURL
 		}
-		if req.Name != "" && user.DisplayName == "" {
-			user.DisplayName = req.Name
+		if userInfo.DisplayName != "" && user.DisplayName == "" {
+			user.DisplayName = userInfo.DisplayName
 		}
 		// Check if user should be promoted to admin (in case admin list changed)
-		if user.Role != "admin" && s.getUserRole(req.Email) == "admin" {
+		if user.Role != "admin" && s.getUserRole(userInfo.Email) == "admin" {
 			user.Role = "admin"
 		}
 		_ = s.store.UpdateUser(ctx, user)
