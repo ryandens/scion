@@ -109,7 +109,7 @@ This is functionally rich, but there are several reliability and debuggability g
 3. Add explicit dispatch attempt model (idempotency + audit).
 4. Make cleanup semantics explicit (`strict` vs `force`) and visible in API.
 
-### Phase 3: Maintainability and architecture cleanup
+### Phase 3: Maintainability and architecture cleanup [COMPLETED]
 1. Deduplicate Hub create-agent handlers into one service path.
 2. Consolidate broker clients (`HTTPRuntimeBrokerClient` and `AuthenticatedBrokerClient`) into one transport + auth strategy layer.
 3. Extract shared grove path resolution for create/start dispatch paths.

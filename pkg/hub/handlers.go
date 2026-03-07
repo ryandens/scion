@@ -367,8 +367,23 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	s.createAgentInGrove(w, r, req, req.GroveID, createdBy, creatorName, notifySubscriberType, notifySubscriberID)
+}
+
+func (s *Server) createAgentInGrove(
+	w http.ResponseWriter,
+	r *http.Request,
+	req CreateAgentRequest,
+	groveID string,
+	createdBy string,
+	creatorName string,
+	notifySubscriberType string,
+	notifySubscriberID string,
+) {
+	ctx := r.Context()
+
 	// Verify grove exists and get its configuration
-	grove, err := s.store.GetGrove(ctx, req.GroveID)
+	grove, err := s.store.GetGrove(ctx, groveID)
 	if err != nil {
 		if err == store.ErrNotFound {
 			NotFound(w, "Grove")
@@ -400,7 +415,7 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_name", err.Error(), nil)
 		return
 	}
-	existingAgent, err := s.store.GetAgentBySlug(ctx, req.GroveID, slug)
+	existingAgent, err := s.store.GetAgentBySlug(ctx, groveID, slug)
 	if err != nil && err != store.ErrNotFound {
 		writeErrorFromErr(w, err, "")
 		return
@@ -418,7 +433,7 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 	// Resolve template if specified - the client may pass either a template ID or name
 	var resolvedTemplate *store.Template
 	if req.Template != "" {
-		resolvedTemplate, err = s.resolveTemplate(ctx, req.Template, req.GroveID)
+		resolvedTemplate, err = s.resolveTemplate(ctx, req.Template, groveID)
 		if err != nil && err != store.ErrNotFound {
 			writeErrorFromErr(w, err, "")
 			return
@@ -427,7 +442,7 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 		if resolvedTemplate == nil {
 			brokerHasLocal := false
 			if runtimeBrokerID != "" {
-				provider, err := s.store.GetGroveProvider(ctx, req.GroveID, runtimeBrokerID)
+				provider, err := s.store.GetGroveProvider(ctx, groveID, runtimeBrokerID)
 				if err == nil && provider.LocalPath != "" {
 					brokerHasLocal = true
 				}
@@ -440,8 +455,6 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Create agent
-
 	// Resolve harness config: prefer template metadata harness field, then explicit request field.
 	// Do NOT use req.Template as fallback since it may contain a UUID.
 	harnessConfig := s.getHarnessConfigFromTemplate(resolvedTemplate, req.HarnessConfig)
@@ -451,7 +464,7 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 		Slug:            slug,
 		Name:            req.Name,
 		Template:        req.Template,
-		GroveID:         req.GroveID,
+		GroveID:         groveID,
 		RuntimeBrokerID: runtimeBrokerID,
 		Phase:           string(state.PhaseCreated),
 		Labels:          req.Labels,
@@ -486,7 +499,7 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 
 	// Create notification subscription if requested
 	if req.Notify {
-		s.createNotifySubscription(ctx, agent.ID, req.GroveID, notifySubscriberType, notifySubscriberID, createdBy)
+		s.createNotifySubscription(ctx, agent.ID, groveID, notifySubscriberType, notifySubscriberID, createdBy)
 	}
 
 	// Workspace bootstrap mode: if WorkspaceFiles are provided with a task,
@@ -500,7 +513,7 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 		// Check if the target broker has local filesystem access to this grove
 		hasLocalPath := false
 		if runtimeBrokerID != "" {
-			provider, err := s.store.GetGroveProvider(ctx, req.GroveID, runtimeBrokerID)
+			provider, err := s.store.GetGroveProvider(ctx, groveID, runtimeBrokerID)
 			if err == nil && provider.LocalPath != "" {
 				hasLocalPath = true
 				s.agentLifecycleLog.Debug("Workspace bootstrap: broker has local path, skipping upload",
@@ -549,7 +562,7 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 	// Hub-native grove remote broker support: if the grove has no git remote
 	// (hub-native) and the workspace is set, upload it to GCS so a remote broker
 	// can download it. This mirrors the workspace bootstrap pattern above.
-	if grove != nil && grove.GitRemote == "" && agent.AppliedConfig != nil && agent.AppliedConfig.Workspace != "" {
+	if grove.GitRemote == "" && agent.AppliedConfig != nil && agent.AppliedConfig.Workspace != "" {
 		hasLocalPath := false
 		if runtimeBrokerID != "" {
 			provider, err := s.store.GetGroveProvider(ctx, grove.ID, runtimeBrokerID)
@@ -2576,212 +2589,7 @@ func (s *Server) createGroveAgent(w http.ResponseWriter, r *http.Request, groveI
 		notifySubscriberType = store.SubscriberTypeUser
 		notifySubscriberID = userIdent.ID()
 	}
-
-	// Get grove to access its configuration (including default runtime broker)
-	grove, err := s.store.GetGrove(ctx, groveID)
-	if err != nil {
-		if err == store.ErrNotFound {
-			NotFound(w, "Grove")
-			return
-		}
-		writeErrorFromErr(w, err, "")
-		return
-	}
-
-	// Resolve the runtime broker
-	runtimeBrokerID, err := s.resolveRuntimeBroker(ctx, w, req.RuntimeBrokerID, grove)
-	if err != nil {
-		// Error response already written by resolveRuntimeBroker
-		return
-	}
-
-	// Enforce broker-level dispatch authorization: only the broker owner can create agents on it
-	if runtimeBrokerID != "" {
-		if !s.checkBrokerDispatchAccess(ctx, w, runtimeBrokerID) {
-			return
-		}
-	}
-
-	// Check if the agent already exists. Handle stale cleanup, restart, etc.
-	slug, err := api.ValidateAgentName(req.Name)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_name", err.Error(), nil)
-		return
-	}
-	existingAgent, err := s.store.GetAgentBySlug(ctx, groveID, slug)
-	if err != nil && err != store.ErrNotFound {
-		writeErrorFromErr(w, err, "")
-		return
-	}
-
-	switch s.handleExistingAgent(ctx, w, existingAgent, grove, runtimeBrokerID, req, notifySubscriberType, notifySubscriberID, createdBy) {
-	case existingAgentStarted, existingAgentErrored:
-		return // Response already written.
-	case existingAgentDeleted:
-		// Fall through to create a new agent below.
-	case existingAgentNone:
-		// No existing agent (or unhandled status) — fall through to create.
-	}
-
-	// Resolve template if specified - the client may pass either a template ID or name
-	var resolvedTemplate *store.Template
-	if req.Template != "" {
-		resolvedTemplate, err = s.resolveTemplate(ctx, req.Template, groveID)
-		if err != nil && err != store.ErrNotFound {
-			writeErrorFromErr(w, err, "")
-			return
-		}
-		// If template was requested but not found, check if the broker has local access
-		if resolvedTemplate == nil {
-			brokerHasLocal := false
-			if runtimeBrokerID != "" {
-				provider, err := s.store.GetGroveProvider(ctx, groveID, runtimeBrokerID)
-				if err == nil && provider.LocalPath != "" {
-					brokerHasLocal = true
-				}
-			}
-			if !brokerHasLocal {
-				NotFound(w, "Template")
-				return
-			}
-			// Template will be resolved locally by the broker
-		}
-	}
-
-	// Create agent
-
-	// Resolve harness config: prefer template metadata harness field, then explicit request field.
-	// Do NOT use req.Template as fallback since it may contain a UUID.
-	harnessConfig := s.getHarnessConfigFromTemplate(resolvedTemplate, req.HarnessConfig)
-
-	agent := &store.Agent{
-		ID:              api.NewUUID(),
-		Slug:            slug,
-		Name:            req.Name,
-		Template:        req.Template,
-		GroveID:         groveID,
-		RuntimeBrokerID: runtimeBrokerID,
-		Phase:           string(state.PhaseCreated),
-		Labels:          req.Labels,
-		Visibility:      store.VisibilityPrivate,
-		CreatedBy:       createdBy,
-		OwnerID:         createdBy,
-	}
-
-	// Store human-friendly slug instead of UUID for display
-	if resolvedTemplate != nil && resolvedTemplate.Slug != "" {
-		agent.Template = resolvedTemplate.Slug
-	}
-
-	agent.AppliedConfig = s.buildAppliedConfig(req, harnessConfig, creatorName)
-	if req.Config != nil {
-		agent.Image = req.Config.Image
-		if req.Config.Detached != nil {
-			agent.Detached = *req.Config.Detached
-		} else {
-			agent.Detached = true
-		}
-	} else {
-		agent.Detached = true
-	}
-
-	s.populateAgentConfig(agent, grove, resolvedTemplate)
-
-	if err := s.store.CreateAgent(ctx, agent); err != nil {
-		writeErrorFromErr(w, err, "")
-		return
-	}
-
-	// Create notification subscription if requested
-	if req.Notify {
-		s.createNotifySubscription(ctx, agent.ID, groveID, notifySubscriberType, notifySubscriberID, createdBy)
-	}
-
-	// Dispatch to runtime broker if available.
-	// Unless provision-only is requested, do a full create+start via DispatchAgentCreate.
-	// Otherwise provision only — set up dirs, worktree, templates without launching the container.
-	var warnings []string
-	if dispatcher := s.GetDispatcher(); dispatcher != nil {
-		if !req.ProvisionOnly {
-			// Use env-gather dispatch if requested
-			if req.GatherEnv {
-				slog.Debug("Hub: env-gather requested, using DispatchAgentCreateWithGather",
-					"agent", agent.Name, "broker", agent.RuntimeBrokerID)
-				envReqs, err := dispatcher.DispatchAgentCreateWithGather(ctx, agent)
-				if err != nil {
-					// Dispatch failed — clean up the agent record and return error
-					_ = s.store.DeleteAgent(ctx, agent.ID)
-					RuntimeError(w, "Failed to dispatch to runtime broker: "+err.Error())
-					return
-				} else if envReqs != nil {
-					// Broker returned 202: needs env gather
-					agent.Phase = string(state.PhaseProvisioning)
-					if err := s.store.UpdateAgent(ctx, agent); err != nil {
-						slog.Warn("Failed to update agent phase for env-gather", "error", err)
-					}
-
-					s.enrichAgent(ctx, agent, grove, nil)
-					hubEnvGather := s.buildEnvGatherResponse(ctx, agent, envReqs)
-
-					writeJSON(w, http.StatusAccepted, CreateAgentResponse{
-						Agent:     agent,
-						Warnings:  warnings,
-						EnvGather: hubEnvGather,
-					})
-					return
-				} else {
-					if agent.Phase == string(state.PhaseCreated) {
-						agent.Phase = string(state.PhaseProvisioning)
-					}
-					if err := s.store.UpdateAgent(ctx, agent); err != nil {
-						warnings = append(warnings, "Failed to update agent phase: "+err.Error())
-					}
-				}
-			} else {
-				envReqs, err := dispatcher.DispatchAgentCreateWithGather(ctx, agent)
-				if err != nil {
-					// Dispatch failed — clean up the agent record and return error
-					_ = s.store.DeleteAgent(ctx, agent.ID)
-					RuntimeError(w, "Failed to dispatch to runtime broker: "+err.Error())
-					return
-				} else if envReqs != nil && len(envReqs.Needs) > 0 {
-					// Broker reported missing required env vars — fail the dispatch.
-					// Clean up the provisioning agent so it doesn't linger.
-					_ = dispatcher.DispatchAgentDelete(ctx, agent, false, false, false, time.Time{})
-					_ = s.store.DeleteAgent(ctx, agent.ID)
-					MissingEnvVars(w, envReqs.Needs, s.buildEnvGatherResponse(ctx, agent, envReqs))
-					return
-				} else {
-					if agent.Phase == string(state.PhaseCreated) {
-						agent.Phase = string(state.PhaseProvisioning)
-					}
-					if err := s.store.UpdateAgent(ctx, agent); err != nil {
-						warnings = append(warnings, "Failed to update agent phase: "+err.Error())
-					}
-				}
-			}
-		} else {
-			// Provision-only: set up agent filesystem without starting
-			if err := dispatcher.DispatchAgentProvision(ctx, agent); err != nil {
-				warnings = append(warnings, "Failed to provision on runtime broker: "+err.Error())
-			} else {
-				agent.Phase = string(state.PhaseCreated)
-				if err := s.store.UpdateAgent(ctx, agent); err != nil {
-					warnings = append(warnings, "Failed to update agent phase: "+err.Error())
-				}
-			}
-		}
-	}
-
-	s.events.PublishAgentCreated(ctx, agent)
-
-	// Enrich agent with grove and broker names for display
-	s.enrichAgent(ctx, agent, grove, nil)
-
-	writeJSON(w, http.StatusCreated, CreateAgentResponse{
-		Agent:    agent,
-		Warnings: warnings,
-	})
+	s.createAgentInGrove(w, r, req, groveID, createdBy, creatorName, notifySubscriberType, notifySubscriberID)
 }
 
 // getGroveAgent gets an agent by ID within a specific grove

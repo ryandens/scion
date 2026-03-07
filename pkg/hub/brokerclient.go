@@ -16,18 +16,9 @@
 package hub
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"fmt"
-	"io"
-	"log/slog"
-	"net/http"
-	"net/url"
-	"strings"
 	"time"
 
-	"github.com/ptone/scion-agent/pkg/apiclient"
 	"github.com/ptone/scion-agent/pkg/store"
 )
 
@@ -35,365 +26,62 @@ import (
 // outgoing requests with HMAC authentication. This allows the Hub to make
 // authenticated requests to Runtime Brokers.
 type AuthenticatedBrokerClient struct {
-	httpClient *http.Client
-	store      store.Store
-	debug      bool
+	transport *brokerHTTPTransport
 }
 
 // NewAuthenticatedBrokerClient creates a new authenticated broker client.
 func NewAuthenticatedBrokerClient(s store.Store, debug bool) *AuthenticatedBrokerClient {
 	return &AuthenticatedBrokerClient{
-		httpClient: &http.Client{
-			Timeout: 120 * time.Second, // Agent creation can take a while
-		},
-		store: s,
-		debug: debug,
+		transport: newBrokerHTTPTransport(debug, &hmacBrokerSigner{store: s}),
 	}
-}
-
-// getBrokerSecret retrieves the secret key for a broker from the store.
-func (c *AuthenticatedBrokerClient) getBrokerSecret(ctx context.Context, brokerID string) ([]byte, error) {
-	secret, err := c.store.GetBrokerSecret(ctx, brokerID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get broker secret: %w", err)
-	}
-
-	if secret.Status != store.BrokerSecretStatusActive {
-		return nil, fmt.Errorf("broker secret is %s", secret.Status)
-	}
-
-	if !secret.ExpiresAt.IsZero() && time.Now().After(secret.ExpiresAt) {
-		return nil, fmt.Errorf("broker secret has expired")
-	}
-
-	return secret.SecretKey, nil
-}
-
-// signRequest signs an HTTP request with HMAC authentication.
-func (c *AuthenticatedBrokerClient) signRequest(ctx context.Context, req *http.Request, brokerID string) error {
-	secret, err := c.getBrokerSecret(ctx, brokerID)
-	if err != nil {
-		return err
-	}
-
-	// Use the shared HMAC auth implementation
-	auth := &apiclient.HMACAuth{
-		BrokerID:  brokerID,
-		SecretKey: secret,
-	}
-
-	return auth.ApplyAuth(req)
-}
-
-// doRequest performs an HTTP request with HMAC signing.
-func (c *AuthenticatedBrokerClient) doRequest(ctx context.Context, brokerID, method, endpoint string, body []byte) (*http.Response, error) {
-	var bodyReader io.Reader
-	if body != nil {
-		bodyReader = bytes.NewReader(body)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, method, endpoint, bodyReader)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-
-	// Sign the request
-	if err := c.signRequest(ctx, req, brokerID); err != nil {
-		if c.debug {
-			slog.Warn("Failed to sign request", "brokerID", brokerID, "error", err)
-		}
-		return nil, fmt.Errorf("failed to sign request: %w", err)
-	} else if c.debug {
-		slog.Debug("Signed request for broker", "brokerID", brokerID)
-	}
-
-	if c.debug {
-		slog.Debug("Outgoing request to broker", "method", method, "endpoint", endpoint)
-	}
-
-	return c.httpClient.Do(req)
 }
 
 // CreateAgent creates an agent on a remote runtime broker with HMAC authentication.
 func (c *AuthenticatedBrokerClient) CreateAgent(ctx context.Context, brokerID, brokerEndpoint string, req *RemoteCreateAgentRequest) (*RemoteAgentResponse, error) {
-	endpoint := fmt.Sprintf("%s/api/v1/agents", strings.TrimSuffix(brokerEndpoint, "/"))
-
-	body, err := json.Marshal(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
-	}
-
-	resp, err := c.doRequest(ctx, brokerID, http.MethodPost, endpoint, body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to send request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		respBody, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("runtime broker returned error %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	var result RemoteAgentResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
-	}
-
-	return &result, nil
+	return c.transport.CreateAgent(ctx, brokerID, brokerEndpoint, req)
 }
 
 // StartAgent starts an agent on a remote runtime broker with HMAC authentication.
 func (c *AuthenticatedBrokerClient) StartAgent(ctx context.Context, brokerID, brokerEndpoint, agentID, task, grovePath, groveSlug, harnessConfig string, resolvedEnv map[string]string, resolvedSecrets []ResolvedSecret) (*RemoteAgentResponse, error) {
-	endpoint := fmt.Sprintf("%s/api/v1/agents/%s/start", strings.TrimSuffix(brokerEndpoint, "/"), url.PathEscape(agentID))
-
-	payload := map[string]interface{}{}
-	if task != "" {
-		payload["task"] = task
-	}
-	if grovePath != "" {
-		payload["grovePath"] = grovePath
-	}
-	if groveSlug != "" {
-		payload["groveSlug"] = groveSlug
-	}
-	if harnessConfig != "" {
-		payload["harnessConfig"] = harnessConfig
-	}
-	if len(resolvedEnv) > 0 {
-		payload["resolvedEnv"] = resolvedEnv
-	}
-	if len(resolvedSecrets) > 0 {
-		payload["resolvedSecrets"] = resolvedSecrets
-	}
-
-	var body []byte
-	if len(payload) > 0 {
-		var err error
-		body, err = json.Marshal(payload)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal request: %w", err)
-		}
-	}
-
-	resp, err := c.doRequest(ctx, brokerID, http.MethodPost, endpoint, body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to send request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		respBody, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("runtime broker returned error %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %w", err)
-	}
-
-	var result RemoteAgentResponse
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		bodySnippet := string(respBody)
-		if len(bodySnippet) > 256 {
-			bodySnippet = bodySnippet[:256] + "...(truncated)"
-		}
-		return nil, fmt.Errorf("failed to decode response: %w (body=%q)", err, bodySnippet)
-	}
-
-	return &result, nil
+	return c.transport.StartAgent(ctx, brokerID, brokerEndpoint, agentID, task, grovePath, groveSlug, harnessConfig, resolvedEnv, resolvedSecrets)
 }
 
 // StopAgent stops an agent on a remote runtime broker with HMAC authentication.
 func (c *AuthenticatedBrokerClient) StopAgent(ctx context.Context, brokerID, brokerEndpoint, agentID string) error {
-	endpoint := fmt.Sprintf("%s/api/v1/agents/%s/stop", strings.TrimSuffix(brokerEndpoint, "/"), url.PathEscape(agentID))
-
-	resp, err := c.doRequest(ctx, brokerID, http.MethodPost, endpoint, nil)
-	if err != nil {
-		return fmt.Errorf("failed to send request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("runtime broker returned error %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	return nil
+	return c.transport.StopAgent(ctx, brokerID, brokerEndpoint, agentID)
 }
 
 // RestartAgent restarts an agent on a remote runtime broker with HMAC authentication.
 func (c *AuthenticatedBrokerClient) RestartAgent(ctx context.Context, brokerID, brokerEndpoint, agentID string) error {
-	endpoint := fmt.Sprintf("%s/api/v1/agents/%s/restart", strings.TrimSuffix(brokerEndpoint, "/"), url.PathEscape(agentID))
-
-	resp, err := c.doRequest(ctx, brokerID, http.MethodPost, endpoint, nil)
-	if err != nil {
-		return fmt.Errorf("failed to send request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("runtime broker returned error %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	return nil
+	return c.transport.RestartAgent(ctx, brokerID, brokerEndpoint, agentID)
 }
 
 // DeleteAgent deletes an agent from a remote runtime broker with HMAC authentication.
 func (c *AuthenticatedBrokerClient) DeleteAgent(ctx context.Context, brokerID, brokerEndpoint, agentID string, deleteFiles, removeBranch, softDelete bool, deletedAt time.Time) error {
-	endpoint := fmt.Sprintf("%s/api/v1/agents/%s?deleteFiles=%t&removeBranch=%t",
-		strings.TrimSuffix(brokerEndpoint, "/"), url.PathEscape(agentID), deleteFiles, removeBranch)
-	if softDelete {
-		endpoint += fmt.Sprintf("&softDelete=true&deletedAt=%s", url.QueryEscape(deletedAt.Format(time.RFC3339)))
-	}
-
-	resp, err := c.doRequest(ctx, brokerID, http.MethodDelete, endpoint, nil)
-	if err != nil {
-		return fmt.Errorf("failed to send request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 && resp.StatusCode != http.StatusNotFound {
-		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("runtime broker returned error %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	return nil
+	return c.transport.DeleteAgent(ctx, brokerID, brokerEndpoint, agentID, deleteFiles, removeBranch, softDelete, deletedAt)
 }
 
 // MessageAgent sends a message to an agent on a remote runtime broker with HMAC authentication.
 func (c *AuthenticatedBrokerClient) MessageAgent(ctx context.Context, brokerID, brokerEndpoint, agentID, message string, interrupt bool) error {
-	endpoint := fmt.Sprintf("%s/api/v1/agents/%s/message", strings.TrimSuffix(brokerEndpoint, "/"), url.PathEscape(agentID))
-
-	body, err := json.Marshal(map[string]interface{}{
-		"message":   message,
-		"interrupt": interrupt,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to marshal request: %w", err)
-	}
-
-	resp, err := c.doRequest(ctx, brokerID, http.MethodPost, endpoint, body)
-	if err != nil {
-		return fmt.Errorf("failed to send request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("runtime broker returned error %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	return nil
+	return c.transport.MessageAgent(ctx, brokerID, brokerEndpoint, agentID, message, interrupt)
 }
 
 // CheckAgentPrompt checks if an agent has a non-empty prompt.md file on a remote runtime broker.
 func (c *AuthenticatedBrokerClient) CheckAgentPrompt(ctx context.Context, brokerID, brokerEndpoint, agentID string) (bool, error) {
-	endpoint := fmt.Sprintf("%s/api/v1/agents/%s/has-prompt", strings.TrimSuffix(brokerEndpoint, "/"), url.PathEscape(agentID))
-
-	resp, err := c.doRequest(ctx, brokerID, http.MethodPost, endpoint, nil)
-	if err != nil {
-		return false, fmt.Errorf("failed to send request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		respBody, _ := io.ReadAll(resp.Body)
-		return false, fmt.Errorf("runtime broker returned error %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	var result HasPromptResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return false, fmt.Errorf("failed to decode response: %w", err)
-	}
-
-	return result.HasPrompt, nil
+	return c.transport.CheckAgentPrompt(ctx, brokerID, brokerEndpoint, agentID)
 }
 
 // CreateAgentWithGather creates an agent and handles 202 env-gather responses.
 func (c *AuthenticatedBrokerClient) CreateAgentWithGather(ctx context.Context, brokerID, brokerEndpoint string, req *RemoteCreateAgentRequest) (*RemoteAgentResponse, *RemoteEnvRequirementsResponse, error) {
-	endpoint := fmt.Sprintf("%s/api/v1/agents", strings.TrimSuffix(brokerEndpoint, "/"))
-
-	body, err := json.Marshal(req)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to marshal request: %w", err)
-	}
-
-	resp, err := c.doRequest(ctx, brokerID, http.MethodPost, endpoint, body)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to send request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		respBody, _ := io.ReadAll(resp.Body)
-		return nil, nil, fmt.Errorf("runtime broker returned error %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	if resp.StatusCode == http.StatusAccepted {
-		var envReqs RemoteEnvRequirementsResponse
-		if err := json.NewDecoder(resp.Body).Decode(&envReqs); err != nil {
-			return nil, nil, fmt.Errorf("failed to decode env requirements: %w", err)
-		}
-		return nil, &envReqs, nil
-	}
-
-	var result RemoteAgentResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, nil, fmt.Errorf("failed to decode response: %w", err)
-	}
-
-	return &result, nil, nil
+	return c.transport.CreateAgentWithGather(ctx, brokerID, brokerEndpoint, req)
 }
 
 // CleanupGrove asks a broker to remove its local hub-native grove directory with HMAC authentication.
 func (c *AuthenticatedBrokerClient) CleanupGrove(ctx context.Context, brokerID, brokerEndpoint, groveSlug string) error {
-	endpoint := fmt.Sprintf("%s/api/v1/groves/%s", strings.TrimSuffix(brokerEndpoint, "/"), url.PathEscape(groveSlug))
-
-	resp, err := c.doRequest(ctx, brokerID, http.MethodDelete, endpoint, nil)
-	if err != nil {
-		return fmt.Errorf("failed to send request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 && resp.StatusCode != http.StatusNotFound {
-		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("runtime broker returned error %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	return nil
+	return c.transport.CleanupGrove(ctx, brokerID, brokerEndpoint, groveSlug)
 }
 
 // FinalizeEnv sends gathered env vars to a broker to complete agent creation.
 func (c *AuthenticatedBrokerClient) FinalizeEnv(ctx context.Context, brokerID, brokerEndpoint, agentID string, env map[string]string) (*RemoteAgentResponse, error) {
-	endpoint := fmt.Sprintf("%s/api/v1/agents/%s/finalize-env", strings.TrimSuffix(brokerEndpoint, "/"), url.PathEscape(agentID))
-
-	body, err := json.Marshal(map[string]interface{}{
-		"env": env,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
-	}
-
-	resp, err := c.doRequest(ctx, brokerID, http.MethodPost, endpoint, body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to send request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		respBody, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("runtime broker returned error %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	var result RemoteAgentResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
-	}
-
-	return &result, nil
+	return c.transport.FinalizeEnv(ctx, brokerID, brokerEndpoint, agentID, env)
 }

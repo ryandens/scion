@@ -16,14 +16,9 @@
 package hub
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
-	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -35,272 +30,41 @@ import (
 // HTTPRuntimeBrokerClient is an HTTP-based implementation of RuntimeBrokerClient.
 // It communicates with remote runtime brokers via their REST API.
 type HTTPRuntimeBrokerClient struct {
-	client *http.Client
-	debug  bool
+	transport *brokerHTTPTransport
 }
 
 // NewHTTPRuntimeBrokerClient creates a new HTTP runtime broker client.
 func NewHTTPRuntimeBrokerClient() *HTTPRuntimeBrokerClient {
-	return &HTTPRuntimeBrokerClient{
-		client: &http.Client{
-			Timeout: 120 * time.Second, // Agent creation can take a while
-		},
-	}
+	return &HTTPRuntimeBrokerClient{transport: newBrokerHTTPTransport(false, nil)}
 }
 
 // NewHTTPRuntimeBrokerClientWithDebug creates a new HTTP runtime broker client with debug logging.
 func NewHTTPRuntimeBrokerClientWithDebug(debug bool) *HTTPRuntimeBrokerClient {
-	return &HTTPRuntimeBrokerClient{
-		client: &http.Client{
-			Timeout: 120 * time.Second,
-		},
-		debug: debug,
-	}
+	return &HTTPRuntimeBrokerClient{transport: newBrokerHTTPTransport(debug, nil)}
 }
 
-// CreateAgent creates an agent on a remote runtime broker.
-// Note: brokerID is unused in this unauthenticated client but is part of the
-// RuntimeBrokerClient interface for compatibility with AuthenticatedBrokerClient.
 func (c *HTTPRuntimeBrokerClient) CreateAgent(ctx context.Context, brokerID, brokerEndpoint string, req *RemoteCreateAgentRequest) (*RemoteAgentResponse, error) {
-	_ = brokerID // Unused in unauthenticated client
-	endpoint := fmt.Sprintf("%s/api/v1/agents", strings.TrimSuffix(brokerEndpoint, "/"))
-
-	body, err := json.Marshal(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
-	}
-
-	if c.debug {
-		slog.Debug("Dispatcher request", "method", "POST", "endpoint", endpoint)
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.client.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("failed to send request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		respBody, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("runtime broker returned error %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	var result RemoteAgentResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
-	}
-
-	return &result, nil
+	return c.transport.CreateAgent(ctx, brokerID, brokerEndpoint, req)
 }
 
-// StartAgent starts an agent on a remote runtime broker.
-// Note: brokerID is unused in this unauthenticated client.
 func (c *HTTPRuntimeBrokerClient) StartAgent(ctx context.Context, brokerID, brokerEndpoint, agentID, task, grovePath, groveSlug, harnessConfig string, resolvedEnv map[string]string, resolvedSecrets []ResolvedSecret) (*RemoteAgentResponse, error) {
-	_ = brokerID // Unused in unauthenticated client
-	endpoint := fmt.Sprintf("%s/api/v1/agents/%s/start", strings.TrimSuffix(brokerEndpoint, "/"), url.PathEscape(agentID))
-
-	if c.debug {
-		slog.Debug("Dispatcher request", "method", "POST", "endpoint", endpoint)
-	}
-
-	payload := map[string]interface{}{}
-	if task != "" {
-		payload["task"] = task
-	}
-	if grovePath != "" {
-		payload["grovePath"] = grovePath
-	}
-	if groveSlug != "" {
-		payload["groveSlug"] = groveSlug
-	}
-	if harnessConfig != "" {
-		payload["harnessConfig"] = harnessConfig
-	}
-	if len(resolvedEnv) > 0 {
-		payload["resolvedEnv"] = resolvedEnv
-	}
-	if len(resolvedSecrets) > 0 {
-		payload["resolvedSecrets"] = resolvedSecrets
-	}
-
-	var body io.Reader
-	if len(payload) > 0 {
-		data, err := json.Marshal(payload)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal request: %w", err)
-		}
-		body = bytes.NewReader(data)
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-	if len(payload) > 0 {
-		httpReq.Header.Set("Content-Type", "application/json")
-	}
-
-	resp, err := c.client.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("failed to send request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		respBody, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("runtime broker returned error %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %w", err)
-	}
-
-	var result RemoteAgentResponse
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		bodySnippet := string(respBody)
-		if len(bodySnippet) > 256 {
-			bodySnippet = bodySnippet[:256] + "...(truncated)"
-		}
-		return nil, fmt.Errorf("failed to decode response: %w (body=%q)", err, bodySnippet)
-	}
-
-	return &result, nil
+	return c.transport.StartAgent(ctx, brokerID, brokerEndpoint, agentID, task, grovePath, groveSlug, harnessConfig, resolvedEnv, resolvedSecrets)
 }
 
-// StopAgent stops an agent on a remote runtime broker.
-// Note: brokerID is unused in this unauthenticated client.
 func (c *HTTPRuntimeBrokerClient) StopAgent(ctx context.Context, brokerID, brokerEndpoint, agentID string) error {
-	_ = brokerID // Unused in unauthenticated client
-	endpoint := fmt.Sprintf("%s/api/v1/agents/%s/stop", strings.TrimSuffix(brokerEndpoint, "/"), url.PathEscape(agentID))
-
-	if c.debug {
-		slog.Debug("Dispatcher request", "method", "POST", "endpoint", endpoint)
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, nil)
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-
-	resp, err := c.client.Do(httpReq)
-	if err != nil {
-		return fmt.Errorf("failed to send request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("runtime broker returned error %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	return nil
+	return c.transport.StopAgent(ctx, brokerID, brokerEndpoint, agentID)
 }
 
-// RestartAgent restarts an agent on a remote runtime broker.
-// Note: brokerID is unused in this unauthenticated client.
 func (c *HTTPRuntimeBrokerClient) RestartAgent(ctx context.Context, brokerID, brokerEndpoint, agentID string) error {
-	_ = brokerID // Unused in unauthenticated client
-	endpoint := fmt.Sprintf("%s/api/v1/agents/%s/restart", strings.TrimSuffix(brokerEndpoint, "/"), url.PathEscape(agentID))
-
-	if c.debug {
-		slog.Debug("Dispatcher request", "method", "POST", "endpoint", endpoint)
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, nil)
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-
-	resp, err := c.client.Do(httpReq)
-	if err != nil {
-		return fmt.Errorf("failed to send request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("runtime broker returned error %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	return nil
+	return c.transport.RestartAgent(ctx, brokerID, brokerEndpoint, agentID)
 }
 
-// DeleteAgent deletes an agent from a remote runtime broker.
-// Note: brokerID is unused in this unauthenticated client.
 func (c *HTTPRuntimeBrokerClient) DeleteAgent(ctx context.Context, brokerID, brokerEndpoint, agentID string, deleteFiles, removeBranch, softDelete bool, deletedAt time.Time) error {
-	_ = brokerID // Unused in unauthenticated client
-	endpoint := fmt.Sprintf("%s/api/v1/agents/%s?deleteFiles=%t&removeBranch=%t",
-		strings.TrimSuffix(brokerEndpoint, "/"), url.PathEscape(agentID), deleteFiles, removeBranch)
-	if softDelete {
-		endpoint += fmt.Sprintf("&softDelete=true&deletedAt=%s", url.QueryEscape(deletedAt.Format(time.RFC3339)))
-	}
-
-	if c.debug {
-		slog.Debug("Dispatcher request", "method", "DELETE", "endpoint", endpoint)
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodDelete, endpoint, nil)
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-
-	resp, err := c.client.Do(httpReq)
-	if err != nil {
-		return fmt.Errorf("failed to send request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 && resp.StatusCode != http.StatusNotFound {
-		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("runtime broker returned error %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	return nil
+	return c.transport.DeleteAgent(ctx, brokerID, brokerEndpoint, agentID, deleteFiles, removeBranch, softDelete, deletedAt)
 }
 
-// MessageAgent sends a message to an agent on a remote runtime broker.
-// Note: brokerID is unused in this unauthenticated client.
 func (c *HTTPRuntimeBrokerClient) MessageAgent(ctx context.Context, brokerID, brokerEndpoint, agentID, message string, interrupt bool) error {
-	_ = brokerID // Unused in unauthenticated client
-	endpoint := fmt.Sprintf("%s/api/v1/agents/%s/message", strings.TrimSuffix(brokerEndpoint, "/"), url.PathEscape(agentID))
-
-	body, err := json.Marshal(map[string]interface{}{
-		"message":   message,
-		"interrupt": interrupt,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to marshal request: %w", err)
-	}
-
-	if c.debug {
-		slog.Debug("Dispatcher request", "method", "POST", "endpoint", endpoint)
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.client.Do(httpReq)
-	if err != nil {
-		return fmt.Errorf("failed to send request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("runtime broker returned error %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	return nil
+	return c.transport.MessageAgent(ctx, brokerID, brokerEndpoint, agentID, message, interrupt)
 }
 
 // HasPromptResponse is the response from the has-prompt action.
@@ -308,156 +72,21 @@ type HasPromptResponse struct {
 	HasPrompt bool `json:"hasPrompt"`
 }
 
-// CheckAgentPrompt checks if an agent has a non-empty prompt.md file.
-// Note: brokerID is unused in this unauthenticated client.
 func (c *HTTPRuntimeBrokerClient) CheckAgentPrompt(ctx context.Context, brokerID, brokerEndpoint, agentID string) (bool, error) {
-	_ = brokerID // Unused in unauthenticated client
-	endpoint := fmt.Sprintf("%s/api/v1/agents/%s/has-prompt", strings.TrimSuffix(brokerEndpoint, "/"), url.PathEscape(agentID))
-
-	if c.debug {
-		slog.Debug("Dispatcher request", "method", "POST", "endpoint", endpoint)
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, nil)
-	if err != nil {
-		return false, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	resp, err := c.client.Do(httpReq)
-	if err != nil {
-		return false, fmt.Errorf("failed to send request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		respBody, _ := io.ReadAll(resp.Body)
-		return false, fmt.Errorf("runtime broker returned error %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	var result HasPromptResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return false, fmt.Errorf("failed to decode response: %w", err)
-	}
-
-	return result.HasPrompt, nil
+	return c.transport.CheckAgentPrompt(ctx, brokerID, brokerEndpoint, agentID)
 }
 
 // CreateAgentWithGather creates an agent and handles 202 env-gather responses.
 func (c *HTTPRuntimeBrokerClient) CreateAgentWithGather(ctx context.Context, brokerID, brokerEndpoint string, req *RemoteCreateAgentRequest) (*RemoteAgentResponse, *RemoteEnvRequirementsResponse, error) {
-	_ = brokerID
-	endpoint := fmt.Sprintf("%s/api/v1/agents", strings.TrimSuffix(brokerEndpoint, "/"))
-
-	body, err := json.Marshal(req)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to marshal request: %w", err)
-	}
-
-	if c.debug {
-		slog.Debug("Dispatcher request (gather)", "method", "POST", "endpoint", endpoint)
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.client.Do(httpReq)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to send request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		respBody, _ := io.ReadAll(resp.Body)
-		return nil, nil, fmt.Errorf("runtime broker returned error %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	if resp.StatusCode == http.StatusAccepted {
-		var envReqs RemoteEnvRequirementsResponse
-		if err := json.NewDecoder(resp.Body).Decode(&envReqs); err != nil {
-			return nil, nil, fmt.Errorf("failed to decode env requirements: %w", err)
-		}
-		return nil, &envReqs, nil
-	}
-
-	var result RemoteAgentResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, nil, fmt.Errorf("failed to decode response: %w", err)
-	}
-
-	return &result, nil, nil
+	return c.transport.CreateAgentWithGather(ctx, brokerID, brokerEndpoint, req)
 }
 
-// FinalizeEnv sends gathered env vars to a broker to complete agent creation.
-// Note: brokerID is unused in this unauthenticated client.
 func (c *HTTPRuntimeBrokerClient) FinalizeEnv(ctx context.Context, brokerID, brokerEndpoint, agentID string, env map[string]string) (*RemoteAgentResponse, error) {
-	_ = brokerID
-	endpoint := fmt.Sprintf("%s/api/v1/agents/%s/finalize-env", strings.TrimSuffix(brokerEndpoint, "/"), url.PathEscape(agentID))
-
-	body, err := json.Marshal(map[string]interface{}{
-		"env": env,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
-	}
-
-	if c.debug {
-		slog.Debug("Dispatcher request", "method", "POST", "endpoint", endpoint)
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.client.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("failed to send request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		respBody, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("runtime broker returned error %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	var result RemoteAgentResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
-	}
-
-	return &result, nil
+	return c.transport.FinalizeEnv(ctx, brokerID, brokerEndpoint, agentID, env)
 }
 
-// CleanupGrove asks a broker to remove its local hub-native grove directory.
-// Note: brokerID is unused in this unauthenticated client.
 func (c *HTTPRuntimeBrokerClient) CleanupGrove(ctx context.Context, brokerID, brokerEndpoint, groveSlug string) error {
-	_ = brokerID // Unused in unauthenticated client
-	endpoint := fmt.Sprintf("%s/api/v1/groves/%s", strings.TrimSuffix(brokerEndpoint, "/"), url.PathEscape(groveSlug))
-
-	if c.debug {
-		slog.Debug("Dispatcher request", "method", "DELETE", "endpoint", endpoint)
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodDelete, endpoint, nil)
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-
-	resp, err := c.client.Do(httpReq)
-	if err != nil {
-		return fmt.Errorf("failed to send request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 && resp.StatusCode != http.StatusNotFound {
-		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("runtime broker returned error %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	return nil
+	return c.transport.CleanupGrove(ctx, brokerID, brokerEndpoint, groveSlug)
 }
 
 // GetClient returns the underlying RuntimeBrokerClient.
@@ -542,37 +171,7 @@ func (d *HTTPAgentDispatcher) getBrokerEndpoint(ctx context.Context, brokerID st
 // buildCreateRequest builds a RemoteCreateAgentRequest from the agent's store record.
 // This is shared between DispatchAgentCreate and DispatchAgentProvision.
 func (d *HTTPAgentDispatcher) buildCreateRequest(ctx context.Context, agent *store.Agent, callerName string) (*RemoteCreateAgentRequest, error) {
-	// Look up the local path for this grove on the target runtime broker.
-	// A provider LocalPath (linked grove) takes precedence over hub-native
-	// slug resolution, even for groves without a git remote. Only when there
-	// is no provider path and no git remote do we fall back to groveSlug so
-	// the broker resolves the conventional ~/.scion/groves/<slug> path.
-	var grovePath string
-	var groveSlug string
-	if agent.GroveID != "" {
-		grove, err := d.store.GetGrove(ctx, agent.GroveID)
-		if err == nil {
-			// First check if the broker has a registered local path for this grove.
-			if agent.RuntimeBrokerID != "" {
-				provider, provErr := d.store.GetGroveProvider(ctx, agent.GroveID, agent.RuntimeBrokerID)
-				if provErr != nil {
-					if d.debug {
-						d.log.Warn("Failed to get grove provider for path lookup", "error", provErr)
-					}
-				} else if provider.LocalPath != "" {
-					grovePath = provider.LocalPath
-					if d.debug {
-						d.log.Debug("Found grove path for broker", "brokerID", agent.RuntimeBrokerID, "path", grovePath)
-					}
-				}
-			}
-			// If no provider path was found and the grove has no git remote,
-			// treat as hub-native: let the broker resolve the path via slug.
-			if grovePath == "" && grove.GitRemote == "" {
-				groveSlug = grove.Slug
-			}
-		}
-	}
+	grovePath, groveSlug := d.resolveDispatchGrovePath(ctx, agent)
 
 	// Build the remote create request
 	req := &RemoteCreateAgentRequest{
@@ -747,6 +346,46 @@ func (d *HTTPAgentDispatcher) buildCreateRequest(ctx context.Context, agent *sto
 	}
 
 	return req, nil
+}
+
+func (d *HTTPAgentDispatcher) resolveDispatchGrovePath(ctx context.Context, agent *store.Agent) (string, string) {
+	// Look up the local path for this grove on the target runtime broker.
+	// A provider LocalPath (linked grove) takes precedence over hub-native
+	// slug resolution, even for groves without a git remote. Only when there
+	// is no provider path and no git remote do we fall back to groveSlug so
+	// the broker resolves the conventional ~/.scion/groves/<slug> path.
+	if agent.GroveID == "" {
+		return "", ""
+	}
+
+	var grovePath string
+	var groveSlug string
+
+	grove, err := d.store.GetGrove(ctx, agent.GroveID)
+	if err != nil {
+		return "", ""
+	}
+
+	// First check if the broker has a registered local path for this grove.
+	if agent.RuntimeBrokerID != "" {
+		provider, provErr := d.store.GetGroveProvider(ctx, agent.GroveID, agent.RuntimeBrokerID)
+		if provErr != nil {
+			if d.debug {
+				d.log.Warn("Failed to get grove provider for path lookup", "error", provErr)
+			}
+		} else if provider.LocalPath != "" {
+			grovePath = provider.LocalPath
+			if d.debug {
+				d.log.Debug("Found grove path for broker", "brokerID", agent.RuntimeBrokerID, "path", grovePath)
+			}
+		}
+	}
+	// If no provider path was found and the grove has no git remote,
+	// treat as hub-native: let the broker resolve the path via slug.
+	if grovePath == "" && grove.GitRemote == "" {
+		groveSlug = grove.Slug
+	}
+	return grovePath, groveSlug
 }
 
 // applyBrokerResponse updates agent fields from the broker's response.
@@ -1085,37 +724,7 @@ func (d *HTTPAgentDispatcher) DispatchAgentStart(ctx context.Context, agent *sto
 		task = agent.AppliedConfig.Task
 	}
 
-	// Look up the local path for this grove on the target runtime broker.
-	// A provider LocalPath (linked grove) takes precedence over hub-native
-	// slug resolution, even for groves without a git remote. Only when there
-	// is no provider path and no git remote do we fall back to groveSlug so
-	// the broker resolves the conventional ~/.scion/groves/<slug> path.
-	var grovePath string
-	var groveSlug string
-	if agent.GroveID != "" {
-		grove, err := d.store.GetGrove(ctx, agent.GroveID)
-		if err == nil {
-			// First check if the broker has a registered local path for this grove.
-			if agent.RuntimeBrokerID != "" {
-				provider, provErr := d.store.GetGroveProvider(ctx, agent.GroveID, agent.RuntimeBrokerID)
-				if provErr != nil {
-					if d.debug {
-						d.log.Warn("Failed to get grove provider for path lookup", "error", provErr)
-					}
-				} else if provider.LocalPath != "" {
-					grovePath = provider.LocalPath
-					if d.debug {
-						d.log.Debug("Found grove path for broker", "brokerID", agent.RuntimeBrokerID, "path", grovePath)
-					}
-				}
-			}
-			// If no provider path was found and the grove has no git remote,
-			// treat as hub-native: let the broker resolve the path via slug.
-			if grovePath == "" && grove.GitRemote == "" {
-				groveSlug = grove.Slug
-			}
-		}
-	}
+	grovePath, groveSlug := d.resolveDispatchGrovePath(ctx, agent)
 
 	// Resolve env vars from Hub storage (user/grove/broker scopes) so that
 	// API keys and other secrets are available when restarting an agent.
