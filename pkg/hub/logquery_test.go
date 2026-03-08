@@ -133,6 +133,25 @@ func TestBuildLogFilter_LogID(t *testing.T) {
 			projectID: "my-project",
 			expected:  `labels.agent_id = "agent-123"`,
 		},
+		{
+			name: "agent slug builds OR filter for sent and received",
+			opts: LogQueryOptions{
+				AgentID:   "agent-123",
+				AgentSlug: "code-reviewer",
+				LogID:     "scion-messages",
+			},
+			projectID: "my-project",
+			expected:  `logName = "projects/my-project/logs/scion-messages" AND (labels.agent_id = "agent-123" OR labels.sender = "agent:code-reviewer")`,
+		},
+		{
+			name: "agent slug without agent ID uses no agent filter",
+			opts: LogQueryOptions{
+				AgentSlug: "code-reviewer",
+				LogID:     "scion-messages",
+			},
+			projectID: "my-project",
+			expected:  `logName = "projects/my-project/logs/scion-messages"`,
+		},
 	}
 
 	for _, tt := range tests {

@@ -244,9 +244,10 @@ func (s *Server) handleAgentMessageLogs(w http.ResponseWriter, r *http.Request, 
 
 	query := r.URL.Query()
 	opts := LogQueryOptions{
-		AgentID: agent.ID,
-		GroveID: agent.GroveID,
-		LogID:   logging.MessageLogID,
+		AgentID:   agent.ID,
+		AgentSlug: agent.Slug,
+		GroveID:   agent.GroveID,
+		LogID:     logging.MessageLogID,
 	}
 
 	if v := query.Get("tail"); v != "" {
@@ -314,8 +315,9 @@ func (s *Server) handleAgentMessageLogsStream(w http.ResponseWriter, r *http.Req
 	}
 
 	opts := LogQueryOptions{
-		AgentID: agent.ID,
-		LogID:   logging.MessageLogID,
+		AgentID:   agent.ID,
+		AgentSlug: agent.Slug,
+		LogID:     logging.MessageLogID,
 	}
 
 	w.Header().Set("Content-Type", "text/event-stream")
