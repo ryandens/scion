@@ -353,6 +353,7 @@ type RemoteAgentInfo struct {
 	HarnessAuth     string `json:"harnessAuth,omitempty"`
 	Image           string `json:"image,omitempty"` // Resolved container image
 	Runtime         string `json:"runtime,omitempty"`
+	Profile         string `json:"profile,omitempty"` // Settings profile used
 	Phase           string `json:"phase,omitempty"`    // Lifecycle phase
 	Activity        string `json:"activity,omitempty"` // Runtime activity
 	Status          string `json:"status"`             // Legacy: kept for backward compat with older brokers

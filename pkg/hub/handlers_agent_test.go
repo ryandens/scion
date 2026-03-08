@@ -1926,6 +1926,99 @@ func TestCreateAgent_HarnessFromRequestField(t *testing.T) {
 	assert.True(t, found, "sync-agent should be in the list")
 }
 
+// TestGetAgent_ProfileInResponse verifies that profile is returned in the
+// single-agent GET response via appliedConfig.
+func TestGetAgent_ProfileInResponse(t *testing.T) {
+	disp := &createAgentDispatcher{createPhase: string(state.PhaseRunning)}
+	srv, s, grove := setupCreateAgentServer(t, disp)
+	ctx := context.Background()
+
+	// Create agent with explicit profile
+	rec := doRequest(t, srv, http.MethodPost, "/api/v1/agents", CreateAgentRequest{
+		Name:    "profile-get-agent",
+		GroveID: grove.ID,
+		Profile: "docker-dev",
+	})
+	require.Equal(t, http.StatusCreated, rec.Code)
+
+	var resp CreateAgentResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+
+	agent, err := s.GetAgent(ctx, resp.Agent.ID)
+	require.NoError(t, err)
+
+	// Verify single-agent GET returns profile in appliedConfig
+	rec2 := doRequest(t, srv, http.MethodGet, "/api/v1/agents/"+agent.ID, nil)
+	require.Equal(t, http.StatusOK, rec2.Code)
+
+	var got map[string]interface{}
+	require.NoError(t, json.Unmarshal(rec2.Body.Bytes(), &got))
+	ac, ok := got["appliedConfig"].(map[string]interface{})
+	require.True(t, ok, "response should include appliedConfig")
+	assert.Equal(t, "docker-dev", ac["profile"],
+		"GET agent response appliedConfig should contain profile")
+}
+
+// TestHeartbeat_BackfillsProfile verifies that the heartbeat handler
+// backfills the profile in AppliedConfig when the agent record is missing it.
+func TestHeartbeat_BackfillsProfile(t *testing.T) {
+	srv, s := testServer(t)
+	ctx := context.Background()
+
+	grove := &store.Grove{
+		ID:   "grove-profile-hb",
+		Name: "Profile HB Grove",
+		Slug: "profile-hb-grove",
+	}
+	require.NoError(t, s.CreateGrove(ctx, grove))
+
+	broker := &store.RuntimeBroker{
+		ID:     "broker-profile-hb",
+		Name:   "Profile HB Broker",
+		Status: store.BrokerStatusOnline,
+	}
+	require.NoError(t, s.CreateRuntimeBroker(ctx, broker))
+
+	agent := &store.Agent{
+		ID:              "agent-profile-hb",
+		Slug:            "profile-hb-agent",
+		Name:            "Profile HB Agent",
+		GroveID:         grove.ID,
+		RuntimeBrokerID: broker.ID,
+		Phase:           string(state.PhaseRunning),
+		AppliedConfig:   &store.AgentAppliedConfig{},
+	}
+	require.NoError(t, s.CreateAgent(ctx, agent))
+
+	// Verify profile is initially empty
+	fetched, err := s.GetAgent(ctx, agent.ID)
+	require.NoError(t, err)
+	assert.Empty(t, fetched.AppliedConfig.Profile)
+
+	// Send heartbeat with profile
+	heartbeat := brokerHeartbeatRequest{
+		Status: "online",
+		Groves: []brokerGroveHeartbeat{{
+			GroveID:    grove.ID,
+			AgentCount: 1,
+			Agents: []brokerAgentHeartbeat{{
+				Slug:    agent.Slug,
+				Phase:   string(state.PhaseRunning),
+				Profile: "k8s-prod",
+			}},
+		}},
+	}
+
+	rec := doRequest(t, srv, http.MethodPost, "/api/v1/runtime-brokers/"+broker.ID+"/heartbeat", heartbeat)
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	// Verify profile was backfilled
+	updated, err := s.GetAgent(ctx, agent.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "k8s-prod", updated.AppliedConfig.Profile,
+		"Profile should be backfilled from heartbeat")
+}
+
 // TestCreateAgent_HarnessFieldIgnoredWhenTemplateResolved verifies that
 // when a template resolves successfully, its harness takes precedence
 // over the explicit Harness field.

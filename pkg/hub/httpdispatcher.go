@@ -425,6 +425,9 @@ func (d *HTTPAgentDispatcher) applyBrokerResponse(agent *store.Agent, resp *Remo
 			if resp.Agent.Image != "" {
 				agent.AppliedConfig.Image = resp.Agent.Image
 			}
+			if resp.Agent.Profile != "" {
+				agent.AppliedConfig.Profile = resp.Agent.Profile
+			}
 		}
 		if resp.Agent.Runtime != "" {
 			agent.Runtime = resp.Agent.Runtime

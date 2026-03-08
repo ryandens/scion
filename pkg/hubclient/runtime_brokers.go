@@ -102,6 +102,7 @@ type AgentHeartbeat struct {
 	Activity        string `json:"activity,omitempty"`
 	ContainerStatus string `json:"containerStatus,omitempty"`
 	HarnessAuth     string `json:"harnessAuth,omitempty"` // Resolved auth method from container labels
+	Profile         string `json:"profile,omitempty"`      // Settings profile used
 }
 
 // CreateBrokerRequest is the request to create a new broker registration.

@@ -63,6 +63,7 @@ type AgentConfig struct {
 	HarnessAuth   string            `json:"harnessAuth,omitempty"`
 	Env           map[string]string `json:"env,omitempty"`
 	Model         string            `json:"model,omitempty"`
+	Profile       string            `json:"profile,omitempty"`
 	Task          string            `json:"task,omitempty"`
 }
 

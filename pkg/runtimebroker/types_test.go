@@ -202,3 +202,16 @@ func TestAgentInfoToResponseHarnessConfig(t *testing.T) {
 		t.Errorf("Template = %q, want %q", resp.Template, "default")
 	}
 }
+
+func TestAgentInfoToResponseProfile(t *testing.T) {
+	info := api.AgentInfo{
+		Name:    "agent-profile",
+		Phase:   "running",
+		Profile: "docker-dev",
+	}
+
+	resp := AgentInfoToResponse(info)
+	if resp.Profile != "docker-dev" {
+		t.Errorf("Profile = %q, want %q", resp.Profile, "docker-dev")
+	}
+}

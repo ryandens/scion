@@ -690,6 +690,7 @@ func (m *AgentManager) Start(ctx context.Context, opts api.StartOptions) (*api.A
 				a.Phase = status
 				a.HarnessConfig = harnessConfigName
 				a.HarnessAuth = opts.HarnessAuth
+				a.Profile = profileName
 				return &a, nil
 			}
 		}
@@ -697,7 +698,7 @@ func (m *AgentManager) Start(ctx context.Context, opts api.StartOptions) (*api.A
 
 	// Container ID returned but not found in listing — it may have exited and been removed
 	warnings = append(warnings, "Container started but could not be verified as running")
-	return &api.AgentInfo{ID: id, Name: opts.Name, Phase: status, Detached: detached, Warnings: warnings, HarnessConfig: harnessConfigName, HarnessAuth: opts.HarnessAuth}, nil
+	return &api.AgentInfo{ID: id, Name: opts.Name, Phase: status, Detached: detached, Warnings: warnings, HarnessConfig: harnessConfigName, HarnessAuth: opts.HarnessAuth, Profile: profileName}, nil
 }
 
 // extractWorkspaceFromVolumes finds a volume mounted to /workspace and returns its source path.

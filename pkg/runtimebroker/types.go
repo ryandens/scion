@@ -113,6 +113,7 @@ type AgentResponse struct {
 	HarnessAuth     string            `json:"harnessAuth,omitempty"`     // Resolved harness auth method
 	Image           string            `json:"image,omitempty"`           // Resolved container image
 	RuntimeType     string            `json:"runtime,omitempty"`         // Runtime type (docker, kubernetes, apple)
+	Profile         string            `json:"profile,omitempty"`         // Settings profile used
 	GroveID         string            `json:"groveId,omitempty"`
 	UserID          string            `json:"userId,omitempty"`
 	Status          string            `json:"status"`
@@ -363,6 +364,7 @@ func AgentInfoToResponse(info api.AgentInfo) AgentResponse {
 		HarnessAuth:     info.HarnessAuth,
 		Image:           info.Image,
 		RuntimeType:     info.Runtime,
+		Profile:         info.Profile,
 		GroveID:         info.GroveID,
 		Status:          status,
 		Phase:           phase,

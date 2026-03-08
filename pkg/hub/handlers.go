@@ -3846,6 +3846,7 @@ type brokerAgentHeartbeat struct {
 	Activity        string `json:"activity,omitempty"`
 	ContainerStatus string `json:"containerStatus,omitempty"`
 	HarnessAuth     string `json:"harnessAuth,omitempty"` // Resolved auth method from container labels
+	Profile         string `json:"profile,omitempty"`      // Settings profile used
 }
 
 func (s *Server) handleBrokerHeartbeat(w http.ResponseWriter, r *http.Request, id string) {
@@ -3938,17 +3939,28 @@ func (s *Server) handleBrokerHeartbeat(w http.ResponseWriter, r *http.Request, i
 				}
 			}
 
-			// Backfill HarnessAuth from heartbeat if the agent record is missing it.
-			// This covers agents created before auth tracking was added, or
-			// agents where auth was auto-detected rather than explicitly set.
+			// Backfill HarnessAuth and Profile from heartbeat if the agent record is missing them.
+			// This covers agents created before tracking was added, or
+			// agents where values were auto-detected rather than explicitly set.
+			needsUpdate := false
 			if agentHB.HarnessAuth != "" && (agent.AppliedConfig == nil || agent.AppliedConfig.HarnessAuth == "") {
 				if agent.AppliedConfig == nil {
 					agent.AppliedConfig = &store.AgentAppliedConfig{}
 				}
 				agent.AppliedConfig.HarnessAuth = agentHB.HarnessAuth
+				needsUpdate = true
+			}
+			if agentHB.Profile != "" && (agent.AppliedConfig == nil || agent.AppliedConfig.Profile == "") {
+				if agent.AppliedConfig == nil {
+					agent.AppliedConfig = &store.AgentAppliedConfig{}
+				}
+				agent.AppliedConfig.Profile = agentHB.Profile
+				needsUpdate = true
+			}
+			if needsUpdate {
 				if err := s.store.UpdateAgent(ctx, agent); err != nil {
-					slog.Warn("Failed to backfill HarnessAuth from heartbeat",
-						"agentID", agent.ID, "harnessAuth", agentHB.HarnessAuth, "error", err)
+					slog.Warn("Failed to backfill agent config from heartbeat",
+						"agentID", agent.ID, "harnessAuth", agentHB.HarnessAuth, "profile", agentHB.Profile, "error", err)
 				}
 			}
 
