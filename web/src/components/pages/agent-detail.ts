@@ -1152,10 +1152,6 @@ export class ScionPageAgentDetail extends LitElement {
             <span class="info-label">Agent ID</span>
             <span class="info-value mono">${agent.id}</span>
           </div>
-          <div class="info-item">
-            <span class="info-label">Name</span>
-            <span class="info-value">${agent.name}</span>
-          </div>
           ${agent.slug
             ? html`
                 <div class="info-item">
