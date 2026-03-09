@@ -43,9 +43,10 @@ import (
 )
 
 type KubernetesRuntime struct {
-	Client           *k8s.Client
-	DefaultNamespace string
-	GKEMode          bool
+	Client             *k8s.Client
+	DefaultNamespace   string
+	GKEMode            bool
+	ListAllNamespaces  bool // When true, List() queries all namespaces for scion pods
 }
 
 func NewKubernetesRuntime(client *k8s.Client) *KubernetesRuntime {
@@ -57,6 +58,103 @@ func NewKubernetesRuntime(client *k8s.Client) *KubernetesRuntime {
 
 func (r *KubernetesRuntime) Name() string {
 	return "kubernetes"
+}
+
+// resolveNamespace determines the namespace for a pod by looking up the
+// scion.namespace annotation on the pod itself. Falls back to DefaultNamespace
+// if the pod is not found or has no annotation.
+func (r *KubernetesRuntime) resolveNamespace(ctx context.Context, podName string) string {
+	// Try to find the pod in the default namespace first
+	pod, err := r.Client.Clientset.CoreV1().Pods(r.DefaultNamespace).Get(ctx, podName, metav1.GetOptions{})
+	if err == nil {
+		if ns, ok := pod.Annotations["scion.namespace"]; ok && ns != "" {
+			return ns
+		}
+		return r.DefaultNamespace
+	}
+
+	// If ListAllNamespaces is enabled, search across all namespaces
+	if r.ListAllNamespaces {
+		pods, err := r.Client.Clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{
+			LabelSelector: fmt.Sprintf("scion.name=%s", podName),
+		})
+		if err == nil {
+			for _, p := range pods.Items {
+				if p.Name == podName {
+					return p.Namespace
+				}
+			}
+		}
+	}
+
+	return r.DefaultNamespace
+}
+
+// parseResourceSafe parses a Kubernetes resource quantity string, returning a
+// user-friendly error instead of panicking like resource.MustParse.
+func parseResourceSafe(value, fieldName string) (resource.Quantity, error) {
+	q, err := resource.ParseQuantity(value)
+	if err != nil {
+		return q, fmt.Errorf("invalid %s resource value %q: %w", fieldName, value, err)
+	}
+	return q, nil
+}
+
+// syncMaxRetries is the maximum number of retry attempts for sync operations.
+const syncMaxRetries = 3
+
+// syncWithRetry wraps a sync operation with exponential backoff retry for
+// transient errors (connection resets, stream interruptions).
+func (r *KubernetesRuntime) syncWithRetry(ctx context.Context, op func() error) error {
+	var lastErr error
+	for attempt := 0; attempt <= syncMaxRetries; attempt++ {
+		if attempt > 0 {
+			backoff := time.Duration(1<<uint(attempt-1)) * time.Second // 1s, 2s, 4s
+			runtimeLog.Warn("Sync attempt failed, retrying",
+				"attempt", attempt, "max_retries", syncMaxRetries,
+				"backoff", backoff, "error", lastErr)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(backoff):
+			}
+		}
+		lastErr = op()
+		if lastErr == nil {
+			return nil
+		}
+		// Only retry on transient errors
+		if !isSyncTransientError(lastErr) {
+			return lastErr
+		}
+	}
+	return fmt.Errorf("sync failed after %d retries: %w", syncMaxRetries, lastErr)
+}
+
+// isSyncTransientError returns true if the error is likely transient and
+// the sync operation should be retried.
+func isSyncTransientError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	transientPatterns := []string{
+		"connection reset",
+		"connection refused",
+		"broken pipe",
+		"stream error",
+		"EOF",
+		"timeout",
+		"i/o timeout",
+		"TLS handshake",
+		"use of closed network connection",
+	}
+	for _, pattern := range transientPatterns {
+		if strings.Contains(strings.ToLower(msg), strings.ToLower(pattern)) {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *KubernetesRuntime) Run(ctx context.Context, config RunConfig) (string, error) {
@@ -106,6 +204,12 @@ func (r *KubernetesRuntime) Run(ctx context.Context, config RunConfig) (string, 
 		config.Annotations["scion.username"] = config.UnixUsername
 	}
 
+	// Persist the resolved namespace as an annotation for lifecycle operations
+	if config.Annotations == nil {
+		config.Annotations = make(map[string]string)
+	}
+	config.Annotations["scion.namespace"] = namespace
+
 	// Create K8s Secret or SecretProviderClass before the pod
 	if len(config.ResolvedSecrets) > 0 {
 		useGKEPath := r.GKEMode
@@ -138,7 +242,10 @@ func (r *KubernetesRuntime) Run(ctx context.Context, config RunConfig) (string, 
 		}
 	}
 
-	pod := r.buildPod(namespace, config)
+	pod, err := r.buildPod(namespace, config)
+	if err != nil {
+		return "", fmt.Errorf("failed to build pod spec: %w", err)
+	}
 
 	writeK8sRuntimeDebugFile(config, namespace, pod)
 
@@ -161,7 +268,9 @@ func (r *KubernetesRuntime) Run(ctx context.Context, config RunConfig) (string, 
 		destHome := fmt.Sprintf("/home/%s", config.UnixUsername)
 		runtimeLog.Info("Syncing agent home", "agent", config.Name, "source", config.HomeDir, "dest", destHome, "phase", "home-sync")
 		fmt.Printf("  Syncing agent home (%s -> %s)...\n", config.HomeDir, destHome)
-		err = r.syncToPod(ctx, namespace, createdPod.Name, config.HomeDir, destHome)
+		err = r.syncWithRetry(ctx, func() error {
+			return r.syncToPod(ctx, namespace, createdPod.Name, config.HomeDir, destHome)
+		})
 		if err != nil {
 			return createdPod.Name, fmt.Errorf("failed to sync home: %w", err)
 		}
@@ -170,7 +279,9 @@ func (r *KubernetesRuntime) Run(ctx context.Context, config RunConfig) (string, 
 	if config.Workspace != "" {
 		runtimeLog.Info("Syncing workspace", "agent", config.Name, "source", config.Workspace, "phase", "workspace-sync")
 		fmt.Printf("  Syncing workspace (%s -> /workspace)...\n", config.Workspace)
-		err = r.syncToPod(ctx, namespace, createdPod.Name, config.Workspace, "/workspace")
+		err = r.syncWithRetry(ctx, func() error {
+			return r.syncToPod(ctx, namespace, createdPod.Name, config.Workspace, "/workspace")
+		})
 		if err != nil {
 			return createdPod.Name, fmt.Errorf("failed to sync workspace: %w", err)
 		}
@@ -455,7 +566,7 @@ func (r *KubernetesRuntime) createAuthFileSecret(ctx context.Context, namespace,
 	return nil
 }
 
-func (r *KubernetesRuntime) buildPod(namespace string, config RunConfig) *corev1.Pod {
+func (r *KubernetesRuntime) buildPod(namespace string, config RunConfig) (*corev1.Pod, error) {
 	// Command Resolution
 	var cmd []string
 	var harnessArgs []string
@@ -665,9 +776,27 @@ func (r *KubernetesRuntime) buildPod(namespace string, config RunConfig) *corev1
 	envVars = append(envVars, corev1.EnvVar{Name: "SCION_HOST_UID", Value: fmt.Sprintf("%d", os.Getuid())})
 	envVars = append(envVars, corev1.EnvVar{Name: "SCION_HOST_GID", Value: fmt.Sprintf("%d", os.Getgid())})
 
-	// TODO: For Kubernetes, we should consider using PodSecurityContext with fsGroup
-	// to handle volume permissions more natively instead of relying on sciontool
-	// UID/GID adjustment.
+	// Security context: set FSGroup from host GID for volume permission alignment.
+	hostGID := int64(os.Getgid())
+	podSecurityContext := &corev1.PodSecurityContext{
+		FSGroup: &hostGID,
+	}
+
+	// Determine image pull policy
+	pullPolicy := corev1.PullIfNotPresent
+	if config.Kubernetes != nil && config.Kubernetes.ImagePullPolicy != "" {
+		switch config.Kubernetes.ImagePullPolicy {
+		case "Always":
+			pullPolicy = corev1.PullAlways
+		case "Never":
+			pullPolicy = corev1.PullNever
+		case "IfNotPresent":
+			pullPolicy = corev1.PullIfNotPresent
+		default:
+			return nil, fmt.Errorf("invalid imagePullPolicy %q: must be Always, IfNotPresent, or Never", config.Kubernetes.ImagePullPolicy)
+		}
+	}
+
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        config.Name,
@@ -676,14 +805,14 @@ func (r *KubernetesRuntime) buildPod(namespace string, config RunConfig) *corev1
 			Annotations: config.Annotations,
 		},
 		Spec: corev1.PodSpec{
-			// TODO: Set SecurityContext.FSGroup here to SCION_HOST_GID
+			SecurityContext: podSecurityContext,
 			Containers: []corev1.Container{
 				{
 					Name:            "agent",
 					Image:           config.Image,
 					Command:         cmd,
 					Env:             envVars,
-					ImagePullPolicy: corev1.PullIfNotPresent,
+					ImagePullPolicy: pullPolicy,
 					WorkingDir:      "/workspace",
 					Stdin:           true,
 					TTY:             true,
@@ -712,24 +841,45 @@ func (r *KubernetesRuntime) buildPod(namespace string, config RunConfig) *corev1
 		pod.Spec.Containers[0].VolumeMounts = append(pod.Spec.Containers[0].VolumeMounts, extraVolumeMounts...)
 	}
 
-	// Apply resource requests/limits from the common resource spec.
+	// Apply resource requests/limits from the common resource spec with safe parsing.
 	if config.Resources != nil {
 		reqs := corev1.ResourceList{}
 		limits := corev1.ResourceList{}
 		if config.Resources.Requests.CPU != "" {
-			reqs[corev1.ResourceCPU] = resource.MustParse(config.Resources.Requests.CPU)
+			q, err := parseResourceSafe(config.Resources.Requests.CPU, "requests.cpu")
+			if err != nil {
+				return nil, err
+			}
+			reqs[corev1.ResourceCPU] = q
 		}
 		if config.Resources.Requests.Memory != "" {
-			reqs[corev1.ResourceMemory] = resource.MustParse(config.Resources.Requests.Memory)
+			q, err := parseResourceSafe(config.Resources.Requests.Memory, "requests.memory")
+			if err != nil {
+				return nil, err
+			}
+			reqs[corev1.ResourceMemory] = q
 		}
 		if config.Resources.Limits.CPU != "" {
-			limits[corev1.ResourceCPU] = resource.MustParse(config.Resources.Limits.CPU)
+			q, err := parseResourceSafe(config.Resources.Limits.CPU, "limits.cpu")
+			if err != nil {
+				return nil, err
+			}
+			limits[corev1.ResourceCPU] = q
 		}
 		if config.Resources.Limits.Memory != "" {
-			limits[corev1.ResourceMemory] = resource.MustParse(config.Resources.Limits.Memory)
+			q, err := parseResourceSafe(config.Resources.Limits.Memory, "limits.memory")
+			if err != nil {
+				return nil, err
+			}
+			limits[corev1.ResourceMemory] = q
 		}
 		if config.Resources.Disk != "" {
-			reqs[corev1.ResourceEphemeralStorage] = resource.MustParse(config.Resources.Disk)
+			q, err := parseResourceSafe(config.Resources.Disk, "disk (ephemeral-storage)")
+			if err != nil {
+				return nil, err
+			}
+			reqs[corev1.ResourceEphemeralStorage] = q
+			limits[corev1.ResourceEphemeralStorage] = q
 		}
 		if len(reqs) > 0 || len(limits) > 0 {
 			pod.Spec.Containers[0].Resources = corev1.ResourceRequirements{
@@ -749,10 +899,18 @@ func (r *KubernetesRuntime) buildPod(namespace string, config RunConfig) *corev1
 			res.Limits = corev1.ResourceList{}
 		}
 		for k, v := range config.Kubernetes.Resources.Requests {
-			res.Requests[corev1.ResourceName(k)] = resource.MustParse(v)
+			q, err := parseResourceSafe(v, fmt.Sprintf("kubernetes.resources.requests.%s", k))
+			if err != nil {
+				return nil, err
+			}
+			res.Requests[corev1.ResourceName(k)] = q
 		}
 		for k, v := range config.Kubernetes.Resources.Limits {
-			res.Limits[corev1.ResourceName(k)] = resource.MustParse(v)
+			q, err := parseResourceSafe(v, fmt.Sprintf("kubernetes.resources.limits.%s", k))
+			if err != nil {
+				return nil, err
+			}
+			res.Limits[corev1.ResourceName(k)] = q
 		}
 	}
 
@@ -826,11 +984,29 @@ func (r *KubernetesRuntime) buildPod(namespace string, config RunConfig) *corev1
 		}
 	}
 
-	if config.Kubernetes != nil && config.Kubernetes.ServiceAccountName != "" {
-		pod.Spec.ServiceAccountName = config.Kubernetes.ServiceAccountName
+	if config.Kubernetes != nil {
+		if config.Kubernetes.ServiceAccountName != "" {
+			pod.Spec.ServiceAccountName = config.Kubernetes.ServiceAccountName
+		}
+		if config.Kubernetes.RuntimeClassName != "" {
+			pod.Spec.RuntimeClassName = &config.Kubernetes.RuntimeClassName
+		}
+		if len(config.Kubernetes.NodeSelector) > 0 {
+			pod.Spec.NodeSelector = config.Kubernetes.NodeSelector
+		}
+		if len(config.Kubernetes.Tolerations) > 0 {
+			for _, t := range config.Kubernetes.Tolerations {
+				pod.Spec.Tolerations = append(pod.Spec.Tolerations, corev1.Toleration{
+					Key:      t.Key,
+					Operator: corev1.TolerationOperator(t.Operator),
+					Value:    t.Value,
+					Effect:   corev1.TaintEffect(t.Effect),
+				})
+			}
+		}
 	}
 
-	return pod
+	return pod, nil
 }
 
 func (r *KubernetesRuntime) waitForPodReady(ctx context.Context, namespace, podName string) error {
@@ -875,9 +1051,31 @@ func (r *KubernetesRuntime) waitForPodReady(ctx context.Context, namespace, podN
 			// Check for terminal failure reasons in waiting state
 			if containerStatus != nil && containerStatus.State.Waiting != nil {
 				reason := containerStatus.State.Waiting.Reason
-				if reason == "ImagePullBackOff" || reason == "ErrImagePull" || reason == "InvalidImageName" {
-					runtimeLog.Error("Pod failed to start", "pod", podName, "reason", reason, "message", containerStatus.State.Waiting.Message, "phase", "image-pull")
-					return fmt.Errorf("pod failed to start: %s - %s", reason, containerStatus.State.Waiting.Message)
+				message := containerStatus.State.Waiting.Message
+				switch reason {
+				case "ImagePullBackOff", "ErrImagePull":
+					runtimeLog.Error("Image pull failed", "pod", podName, "reason", reason, "message", message, "phase", "image-pull")
+					return fmt.Errorf("image pull failed for pod %q: %s — verify the image name and registry access (image pull policy: check kubernetes.imagePullPolicy)", podName, message)
+				case "InvalidImageName":
+					runtimeLog.Error("Invalid image name", "pod", podName, "message", message, "phase", "image-pull")
+					return fmt.Errorf("invalid image name for pod %q: %s", podName, message)
+				case "CreateContainerConfigError":
+					runtimeLog.Error("Container config error", "pod", podName, "message", message, "phase", "container-config")
+					return fmt.Errorf("container configuration error for pod %q: %s — check secret references and volume mounts", podName, message)
+				case "CrashLoopBackOff":
+					runtimeLog.Error("Container crash loop", "pod", podName, "message", message, "phase", "crash-loop")
+					return fmt.Errorf("container is crash-looping in pod %q: %s — check container logs with 'scion logs'", podName, message)
+				case "Unschedulable":
+					runtimeLog.Error("Pod unschedulable", "pod", podName, "message", message, "phase", "scheduling")
+					return fmt.Errorf("pod %q cannot be scheduled: %s — check node selectors, tolerations, and resource availability", podName, message)
+				}
+			}
+
+			// Check pod-level conditions for scheduling failures
+			for _, cond := range pod.Status.Conditions {
+				if cond.Type == corev1.PodScheduled && cond.Status == corev1.ConditionFalse && cond.Reason == "Unschedulable" {
+					runtimeLog.Error("Pod unschedulable", "pod", podName, "message", cond.Message, "phase", "scheduling")
+					return fmt.Errorf("pod %q cannot be scheduled: %s — check node selectors, tolerations, and resource availability", podName, cond.Message)
 				}
 			}
 
@@ -1044,6 +1242,15 @@ func (r *KubernetesRuntime) Stop(ctx context.Context, id string) error {
 func (r *KubernetesRuntime) Delete(ctx context.Context, id string) error {
 	namespace := r.DefaultNamespace
 
+	// Support namespace/pod format
+	if strings.Contains(id, "/") {
+		parts := strings.SplitN(id, "/", 2)
+		namespace = parts[0]
+		id = parts[1]
+	} else {
+		namespace = r.resolveNamespace(ctx, id)
+	}
+
 	// Clean up agent secrets and SecretProviderClasses before deleting the pod
 	r.cleanupAgentSecrets(ctx, namespace, id)
 
@@ -1062,6 +1269,10 @@ func (r *KubernetesRuntime) Delete(ctx context.Context, id string) error {
 
 func (r *KubernetesRuntime) List(ctx context.Context, labelFilter map[string]string) ([]api.AgentInfo, error) {
 	namespace := r.DefaultNamespace
+	// When ListAllNamespaces is enabled, query across all namespaces
+	if r.ListAllNamespaces {
+		namespace = ""
+	}
 
 	var selector string
 	if len(labelFilter) > 0 {
@@ -1128,6 +1339,10 @@ func (r *KubernetesRuntime) List(ctx context.Context, labelFilter map[string]str
 			Phase:           agentStatus,
 			Image:           p.Spec.Containers[0].Image,
 			Runtime:         r.Name(),
+			Kubernetes: &api.AgentK8sMetadata{
+				Namespace: p.Namespace,
+				PodName:   p.Name,
+			},
 		})
 	}
 	return agents, nil
@@ -1135,7 +1350,15 @@ func (r *KubernetesRuntime) List(ctx context.Context, labelFilter map[string]str
 
 func (r *KubernetesRuntime) GetLogs(ctx context.Context, id string) (string, error) {
 	namespace := r.DefaultNamespace
-	podName := id // id is now pod name
+	podName := id
+
+	if strings.Contains(id, "/") {
+		parts := strings.SplitN(id, "/", 2)
+		namespace = parts[0]
+		podName = parts[1]
+	} else {
+		namespace = r.resolveNamespace(ctx, podName)
+	}
 
 	req := r.Client.Clientset.CoreV1().Pods(namespace).GetLogs(podName, &corev1.PodLogOptions{})
 	podLogs, err := req.Stream(ctx)
@@ -1153,8 +1376,16 @@ func (r *KubernetesRuntime) GetLogs(ctx context.Context, id string) (string, err
 }
 
 func (r *KubernetesRuntime) Attach(ctx context.Context, id string) error {
-	namespace := r.DefaultNamespace
 	podName := id
+	namespace := r.DefaultNamespace
+
+	if strings.Contains(id, "/") {
+		parts := strings.SplitN(id, "/", 2)
+		namespace = parts[0]
+		podName = parts[1]
+	} else {
+		namespace = r.resolveNamespace(ctx, podName)
+	}
 
 	// Find pod first to check status
 	agents, err := r.List(ctx, map[string]string{"scion.name": id})
@@ -1294,8 +1525,15 @@ func (t *terminalSizeQueue) Next() *remotecommand.TerminalSize {
 }
 
 func (r *KubernetesRuntime) ImageExists(ctx context.Context, image string) (bool, error) {
+	// Validate image format before accepting it
+	if image == "" {
+		return false, fmt.Errorf("image name is empty")
+	}
+	if strings.ContainsAny(image, " \t\n") {
+		return false, fmt.Errorf("image name %q contains whitespace", image)
+	}
 	// K8s pulls images if not present, so we can assume it "exists" or will be pulled.
-	// Implementing a strict check would require querying the node or registry which is complex here.
+	// Pull failures are caught during waitForPodReady with detailed error messages.
 	return true, nil
 }
 
@@ -1383,13 +1621,17 @@ func (r *KubernetesRuntime) Sync(ctx context.Context, id string, direction SyncD
 
 	if direction == SyncFrom {
 		fmt.Printf("Syncing workspace (agent -> %s)...\n", workspacePath)
-		if err := r.syncFromPod(ctx, namespace, agent.ContainerID, "/workspace", workspacePath); err != nil {
+		if err := r.syncWithRetry(ctx, func() error {
+			return r.syncFromPod(ctx, namespace, agent.ContainerID, "/workspace", workspacePath)
+		}); err != nil {
 			return err
 		}
 		if homeDir != "" && username != "" {
 			destHome := fmt.Sprintf("/home/%s", username)
 			fmt.Printf("Syncing agent home (agent -> %s)...\n", homeDir)
-			if err := r.syncFromPod(ctx, namespace, agent.ContainerID, destHome, homeDir); err != nil {
+			if err := r.syncWithRetry(ctx, func() error {
+				return r.syncFromPod(ctx, namespace, agent.ContainerID, destHome, homeDir)
+			}); err != nil {
 				return err
 			}
 		}
@@ -1397,13 +1639,17 @@ func (r *KubernetesRuntime) Sync(ctx context.Context, id string, direction SyncD
 	}
 
 	fmt.Printf("Syncing workspace (%s -> agent)...\n", workspacePath)
-	if err := r.syncToPod(ctx, namespace, agent.ContainerID, workspacePath, "/workspace"); err != nil {
+	if err := r.syncWithRetry(ctx, func() error {
+		return r.syncToPod(ctx, namespace, agent.ContainerID, workspacePath, "/workspace")
+	}); err != nil {
 		return err
 	}
 	if homeDir != "" && username != "" {
 		destHome := fmt.Sprintf("/home/%s", username)
 		fmt.Printf("Syncing agent home (%s -> agent)...\n", homeDir)
-		if err := r.syncToPod(ctx, namespace, agent.ContainerID, homeDir, destHome); err != nil {
+		if err := r.syncWithRetry(ctx, func() error {
+			return r.syncToPod(ctx, namespace, agent.ContainerID, homeDir, destHome)
+		}); err != nil {
 			return err
 		}
 	}
@@ -1413,6 +1659,14 @@ func (r *KubernetesRuntime) Sync(ctx context.Context, id string, direction SyncD
 func (r *KubernetesRuntime) Exec(ctx context.Context, id string, cmd []string) (string, error) {
 	namespace := r.DefaultNamespace
 	podName := id
+
+	if strings.Contains(id, "/") {
+		parts := strings.SplitN(id, "/", 2)
+		namespace = parts[0]
+		podName = parts[1]
+	} else {
+		namespace = r.resolveNamespace(ctx, podName)
+	}
 
 	req := r.Client.Clientset.CoreV1().RESTClient().Post().
 		Resource("pods").
@@ -1462,6 +1716,8 @@ func (r *KubernetesRuntime) GetWorkspacePath(ctx context.Context, id string) (st
 		parts := strings.SplitN(id, "/", 2)
 		namespace = parts[0]
 		id = parts[1]
+	} else {
+		namespace = r.resolveNamespace(ctx, id)
 	}
 
 	pod, err := r.Client.Clientset.CoreV1().Pods(namespace).Get(ctx, id, metav1.GetOptions{})

@@ -59,7 +59,7 @@ func TestKubernetesRuntime_Run_Annotations(t *testing.T) {
 		config.Annotations["scion.username"] = config.UnixUsername
 	}
 
-	pod := r.buildPod("default", config)
+	pod, _ := r.buildPod("default", config)
 
 	if pod.Annotations["scion.workspace"] != "/path/to/workspace" {
 		t.Errorf("expected workspace annotation /path/to/workspace, got %s", pod.Annotations["scion.workspace"])

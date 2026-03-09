@@ -78,7 +78,7 @@ func TestBuildPod_HarnessEnv(t *testing.T) {
 		Harness:      &EnvHarness{},
 	}
 
-	pod := rt.buildPod("default", config)
+	pod, _ := rt.buildPod("default", config)
 
 	envMap := make(map[string]string)
 	for _, env := range pod.Spec.Containers[0].Env {
@@ -110,7 +110,7 @@ func TestBuildPod_TelemetryEnv(t *testing.T) {
 		TelemetryEnabled: true,
 	}
 
-	pod := rt.buildPod("default", config)
+	pod, _ := rt.buildPod("default", config)
 
 	envMap := make(map[string]string)
 	for _, env := range pod.Spec.Containers[0].Env {
@@ -145,7 +145,7 @@ func TestBuildPod_ResolvedAuth_ComposesWithSecrets(t *testing.T) {
 		},
 	}
 
-	pod := rt.buildPod("default", config)
+	pod, _ := rt.buildPod("default", config)
 
 	envMap := make(map[string]string)
 	var apiKeyFromRef bool
@@ -186,7 +186,7 @@ func TestBuildPod_ResolvedAuth_NoHostPath(t *testing.T) {
 		},
 	}
 
-	pod := rt.buildPod("default", config)
+	pod, _ := rt.buildPod("default", config)
 
 	// Auth env should be present
 	envMap := make(map[string]string)
@@ -250,7 +250,7 @@ func TestBuildPod_LocalVolumes_Skipped(t *testing.T) {
 		},
 	}
 
-	pod := rt.buildPod("default", config)
+	pod, _ := rt.buildPod("default", config)
 
 	// Should NOT have any volumes for local mounts (only workspace emptydir should exist)
 	for _, v := range pod.Spec.Volumes {
@@ -272,7 +272,7 @@ func TestBuildPod_GCSVolumes_StillWork(t *testing.T) {
 		},
 	}
 
-	pod := rt.buildPod("default", config)
+	pod, _ := rt.buildPod("default", config)
 
 	foundGCS := false
 	for _, v := range pod.Spec.Volumes {
@@ -296,7 +296,7 @@ func TestBuildPod_WorkingDir_Default(t *testing.T) {
 		UnixUsername: "scion",
 	}
 
-	pod := rt.buildPod("default", config)
+	pod, _ := rt.buildPod("default", config)
 
 	if pod.Spec.Containers[0].WorkingDir != "/workspace" {
 		t.Errorf("expected WorkingDir /workspace, got %s", pod.Spec.Containers[0].WorkingDir)
@@ -317,7 +317,7 @@ func TestBuildPod_GitClone_Annotations(t *testing.T) {
 		},
 	}
 
-	pod := rt.buildPod("default", config)
+	pod, _ := rt.buildPod("default", config)
 
 	if pod.Annotations["scion.git_clone"] != "true" {
 		t.Error("expected scion.git_clone annotation")

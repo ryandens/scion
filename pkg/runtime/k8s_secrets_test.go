@@ -50,7 +50,7 @@ func TestBuildPod_FallbackSecrets_Environment(t *testing.T) {
 		},
 	}
 
-	pod := rt.buildPod("default", config)
+	pod, _ := rt.buildPod("default", config)
 
 	// Environment secrets should use secretKeyRef, not literal values
 	for _, env := range pod.Spec.Containers[0].Env {
@@ -95,7 +95,7 @@ func TestBuildPod_FallbackSecrets_File(t *testing.T) {
 		},
 	}
 
-	pod := rt.buildPod("default", config)
+	pod, _ := rt.buildPod("default", config)
 
 	// Should have agent-secrets volume
 	foundVolume := false
@@ -151,7 +151,7 @@ func TestBuildPod_FallbackSecrets_Variable(t *testing.T) {
 		},
 	}
 
-	pod := rt.buildPod("default", config)
+	pod, _ := rt.buildPod("default", config)
 
 	// Should have agent-secrets volume
 	foundVolume := false
@@ -193,7 +193,7 @@ func TestBuildPod_GKESecrets_Environment(t *testing.T) {
 		},
 	}
 
-	pod := rt.buildPod("default", config)
+	pod, _ := rt.buildPod("default", config)
 
 	// Should have secrets-store CSI volume
 	foundCSI := false
@@ -258,7 +258,7 @@ func TestBuildPod_GKESecrets_File(t *testing.T) {
 		},
 	}
 
-	pod := rt.buildPod("default", config)
+	pod, _ := rt.buildPod("default", config)
 
 	// File secrets in GKE mode use CSI subPath mounts
 	foundFileMount := false
@@ -292,7 +292,7 @@ func TestBuildPod_GKEFallback_NoRefs(t *testing.T) {
 		},
 	}
 
-	pod := rt.buildPod("default", config)
+	pod, _ := rt.buildPod("default", config)
 
 	// Should NOT have secrets-store volume (GKE fallback)
 	for _, v := range pod.Spec.Volumes {
@@ -323,7 +323,7 @@ func TestBuildPod_NoSecrets(t *testing.T) {
 		UnixUsername: "scion",
 	}
 
-	pod := rt.buildPod("default", config)
+	pod, _ := rt.buildPod("default", config)
 
 	// Should not have any secret-related volumes
 	for _, v := range pod.Spec.Volumes {

@@ -124,6 +124,7 @@ func GetRuntime(grovePath string, profileName string) Runtime {
 			rt.DefaultNamespace = rtConfig.Namespace
 		}
 		rt.GKEMode = rtConfig.GKE
+		rt.ListAllNamespaces = rtConfig.ListAllNamespaces
 		return rt
 	}
 

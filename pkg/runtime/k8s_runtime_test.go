@@ -100,7 +100,7 @@ func TestKubernetesRuntime_BuildPod_Env(t *testing.T) {
 		Image: "test-image",
 	}
 
-	pod := r.buildPod("default", config)
+	pod, _ := r.buildPod("default", config)
 
 	foundUID := false
 	foundGID := false

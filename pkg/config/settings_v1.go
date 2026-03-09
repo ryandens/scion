@@ -458,13 +458,14 @@ type V1TelemetrySamplingConfig struct {
 
 // V1RuntimeConfig extends RuntimeConfig with a Type field.
 type V1RuntimeConfig struct {
-	Type      string            `json:"type,omitempty" yaml:"type,omitempty" koanf:"type"`
-	Host      string            `json:"host,omitempty" yaml:"host,omitempty" koanf:"host"`
-	Context   string            `json:"context,omitempty" yaml:"context,omitempty" koanf:"context"`
-	Namespace string            `json:"namespace,omitempty" yaml:"namespace,omitempty" koanf:"namespace"`
-	Env       map[string]string `json:"env,omitempty" yaml:"env,omitempty" koanf:"env"`
-	Sync      string            `json:"sync,omitempty" yaml:"sync,omitempty" koanf:"sync"`
-	GKE       bool              `json:"gke,omitempty" yaml:"gke,omitempty" koanf:"gke"`
+	Type              string            `json:"type,omitempty" yaml:"type,omitempty" koanf:"type"`
+	Host              string            `json:"host,omitempty" yaml:"host,omitempty" koanf:"host"`
+	Context           string            `json:"context,omitempty" yaml:"context,omitempty" koanf:"context"`
+	Namespace         string            `json:"namespace,omitempty" yaml:"namespace,omitempty" koanf:"namespace"`
+	Env               map[string]string `json:"env,omitempty" yaml:"env,omitempty" koanf:"env"`
+	Sync              string            `json:"sync,omitempty" yaml:"sync,omitempty" koanf:"sync"`
+	GKE               bool              `json:"gke,omitempty" yaml:"gke,omitempty" koanf:"gke"`
+	ListAllNamespaces bool              `json:"list_all_namespaces,omitempty" yaml:"list_all_namespaces,omitempty" koanf:"list_all_namespaces"`
 }
 
 // HarnessConfigEntry defines a harness configuration entry in versioned settings.
