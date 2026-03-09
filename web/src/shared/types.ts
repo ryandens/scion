@@ -46,6 +46,7 @@ export interface AdminUser {
   status: 'active' | 'suspended';
   created: string;
   lastLogin?: string;
+  lastSeen?: string;
   _capabilities?: Capabilities;
 }
 

@@ -26,6 +26,9 @@ import { customElement, state } from 'lit/decorators.js';
 import type { AdminUser } from '../../shared/types.js';
 import '../shared/status-badge.js';
 
+type SortField = 'name' | 'created' | 'lastSeen';
+type SortDir = 'asc' | 'desc';
+
 @customElement('scion-page-admin-users')
 export class ScionPageAdminUsers extends LitElement {
   @state()
@@ -36,6 +39,12 @@ export class ScionPageAdminUsers extends LitElement {
 
   @state()
   private error: string | null = null;
+
+  @state()
+  private sortField: SortField = 'name';
+
+  @state()
+  private sortDir: SortDir = 'asc';
 
   static override styles = css`
     :host {
@@ -83,6 +92,27 @@ export class ScionPageAdminUsers extends LitElement {
       color: var(--scion-text-muted, #64748b);
       background: var(--scion-bg-subtle, #f1f5f9);
       border-bottom: 1px solid var(--scion-border, #e2e8f0);
+    }
+
+    th.sortable {
+      cursor: pointer;
+      user-select: none;
+    }
+
+    th.sortable:hover {
+      color: var(--scion-text, #1e293b);
+    }
+
+    .sort-indicator {
+      display: inline-block;
+      margin-left: 0.25rem;
+      font-size: 0.625rem;
+      vertical-align: middle;
+      opacity: 0.4;
+    }
+
+    th.sorted .sort-indicator {
+      opacity: 1;
     }
 
     td {
@@ -173,6 +203,12 @@ export class ScionPageAdminUsers extends LitElement {
       color: var(--scion-text-muted, #64748b);
     }
 
+    .status-cell {
+      display: flex;
+      flex-direction: column;
+      gap: 0.125rem;
+    }
+
     .status-dot {
       display: inline-flex;
       align-items: center;
@@ -194,6 +230,12 @@ export class ScionPageAdminUsers extends LitElement {
 
     .status-dot.suspended::before {
       background: var(--sl-color-danger-500, #ef4444);
+    }
+
+    .last-seen-text {
+      font-size: 0.6875rem;
+      color: var(--scion-text-muted, #64748b);
+      padding-left: 0.875rem;
     }
 
     .meta-text {
@@ -356,6 +398,43 @@ export class ScionPageAdminUsers extends LitElement {
       .slice(0, 2);
   }
 
+  private getSortedUsers(): AdminUser[] {
+    return [...this.users].sort((a, b) => {
+      let cmp = 0;
+      switch (this.sortField) {
+        case 'name':
+          cmp = (a.displayName || a.email).localeCompare(b.displayName || b.email);
+          break;
+        case 'created': {
+          const aTime = a.created ? new Date(a.created).getTime() : 0;
+          const bTime = b.created ? new Date(b.created).getTime() : 0;
+          cmp = aTime - bTime;
+          break;
+        }
+        case 'lastSeen': {
+          const aTime = a.lastSeen ? new Date(a.lastSeen).getTime() : 0;
+          const bTime = b.lastSeen ? new Date(b.lastSeen).getTime() : 0;
+          cmp = aTime - bTime;
+          break;
+        }
+      }
+      return this.sortDir === 'asc' ? cmp : -cmp;
+    });
+  }
+
+  private toggleSort(field: SortField): void {
+    if (this.sortField === field) {
+      this.sortDir = this.sortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      this.sortField = field;
+      this.sortDir = field === 'name' ? 'asc' : 'desc';
+    }
+  }
+
+  private sortIndicator(field: SortField): string {
+    return this.sortField === field ? (this.sortDir === 'asc' ? '▲' : '▼') : '▲';
+  }
+
   override render() {
     return html`
       <div class="header">
@@ -406,20 +485,40 @@ export class ScionPageAdminUsers extends LitElement {
       `;
     }
 
+    const sorted = this.getSortedUsers();
+
     return html`
       <div class="table-container">
         <table>
           <thead>
             <tr>
-              <th>User</th>
+              <th
+                class="sortable ${this.sortField === 'name' ? 'sorted' : ''}"
+                @click=${() => this.toggleSort('name')}
+              >
+                User
+                <span class="sort-indicator">${this.sortIndicator('name')}</span>
+              </th>
               <th>Role</th>
-              <th>Status</th>
+              <th
+                class="sortable ${this.sortField === 'lastSeen' ? 'sorted' : ''}"
+                @click=${() => this.toggleSort('lastSeen')}
+              >
+                Status
+                <span class="sort-indicator">${this.sortIndicator('lastSeen')}</span>
+              </th>
               <th class="hide-mobile">Last Login</th>
-              <th class="hide-mobile">Created</th>
+              <th
+                class="hide-mobile sortable ${this.sortField === 'created' ? 'sorted' : ''}"
+                @click=${() => this.toggleSort('created')}
+              >
+                Created
+                <span class="sort-indicator">${this.sortIndicator('created')}</span>
+              </th>
             </tr>
           </thead>
           <tbody>
-            ${this.users.map((user) => this.renderUserRow(user))}
+            ${sorted.map((user) => this.renderUserRow(user))}
           </tbody>
         </table>
       </div>
@@ -446,7 +545,12 @@ export class ScionPageAdminUsers extends LitElement {
           <span class="role-badge ${user.role}">${user.role}</span>
         </td>
         <td>
-          <span class="status-dot ${user.status}">${user.status}</span>
+          <div class="status-cell">
+            <span class="status-dot ${user.status}">${user.status}</span>
+            ${user.lastSeen
+              ? html`<span class="last-seen-text">${this.formatRelativeTime(user.lastSeen)}</span>`
+              : ''}
+          </div>
         </td>
         <td class="hide-mobile">
           <span class="meta-text">${this.formatRelativeTime(user.lastLogin)}</span>

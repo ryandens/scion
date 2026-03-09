@@ -396,6 +396,9 @@ type Server struct {
 	// Message broker proxy for pub/sub message routing (nil = disabled)
 	messageBrokerProxy *MessageBrokerProxy
 
+	// User last-seen activity tracker (nil = disabled)
+	userActivity *UserActivityTracker
+
 	// Dedicated request logger (nil = disabled)
 	requestLogger *slog.Logger
 
@@ -435,6 +438,9 @@ func New(cfg ServerConfig, s store.Store) *Server {
 		templateLog:       logging.Subsystem("hub.templates"),
 		workspaceLog:      logging.Subsystem("hub.workspace"),
 	}
+
+	// Initialize user activity tracker (throttled to once per hour per user)
+	srv.userActivity = NewUserActivityTracker(s, time.Hour)
 
 	ctx := context.Background()
 
@@ -1347,6 +1353,11 @@ func (s *Server) applyMiddleware(h http.Handler) http.Handler {
 		} else {
 			h = BrokerAuthMiddleware(s.brokerAuthService)(h)
 		}
+	}
+
+	// Record user last-seen activity (after auth, so identity is available).
+	if s.userActivity != nil {
+		h = userActivityMiddleware(s.userActivity)(h)
 	}
 
 	// Apply admin mode middleware (after auth, so identity is available).

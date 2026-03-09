@@ -335,6 +335,9 @@ type UserStore interface {
 	// Returns ErrNotFound if the user doesn't exist.
 	UpdateUser(ctx context.Context, user *User) error
 
+	// UpdateUserLastSeen sets only the last_seen timestamp for a user.
+	UpdateUserLastSeen(ctx context.Context, id string, t time.Time) error
+
 	// DeleteUser removes a user by ID.
 	// Returns ErrNotFound if the user doesn't exist.
 	DeleteUser(ctx context.Context, id string) error

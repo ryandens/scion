@@ -101,6 +101,7 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		migrationV24,
 		migrationV25,
 		migrationV26,
+		migrationV27,
 	}
 
 	// Create migrations table if not exists
@@ -677,6 +678,10 @@ const migrationV26 = `
 ALTER TABLE agents ADD COLUMN current_turns INTEGER DEFAULT 0;
 ALTER TABLE agents ADD COLUMN current_model_calls INTEGER DEFAULT 0;
 ALTER TABLE agents ADD COLUMN started_at TIMESTAMP;
+`
+
+const migrationV27 = `
+ALTER TABLE users ADD COLUMN last_seen TIMESTAMP;
 `
 
 // Helper functions for JSON marshaling/unmarshaling
@@ -2579,14 +2584,14 @@ func (s *SQLiteStore) CreateUser(ctx context.Context, user *store.User) error {
 func (s *SQLiteStore) GetUser(ctx context.Context, id string) (*store.User, error) {
 	user := &store.User{}
 	var preferences string
-	var lastLogin sql.NullTime
+	var lastLogin, lastSeen sql.NullTime
 
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, email, display_name, avatar_url, role, status, preferences, created_at, last_login
+		SELECT id, email, display_name, avatar_url, role, status, preferences, created_at, last_login, last_seen
 		FROM users WHERE id = ?
 	`, id).Scan(
 		&user.ID, &user.Email, &user.DisplayName, &user.AvatarURL, &user.Role, &user.Status,
-		&preferences, &user.Created, &lastLogin,
+		&preferences, &user.Created, &lastLogin, &lastSeen,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -2597,6 +2602,9 @@ func (s *SQLiteStore) GetUser(ctx context.Context, id string) (*store.User, erro
 
 	if lastLogin.Valid {
 		user.LastLogin = lastLogin.Time
+	}
+	if lastSeen.Valid {
+		user.LastSeen = lastSeen.Time
 	}
 	unmarshalJSON(preferences, &user.Preferences)
 
@@ -2619,11 +2627,11 @@ func (s *SQLiteStore) UpdateUser(ctx context.Context, user *store.User) error {
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE users SET
 			email = ?, display_name = ?, avatar_url = ?,
-			role = ?, status = ?, preferences = ?, last_login = ?
+			role = ?, status = ?, preferences = ?, last_login = ?, last_seen = ?
 		WHERE id = ?
 	`,
 		user.Email, user.DisplayName, user.AvatarURL,
-		user.Role, user.Status, marshalJSON(user.Preferences), user.LastLogin,
+		user.Role, user.Status, marshalJSON(user.Preferences), user.LastLogin, user.LastSeen,
 		user.ID,
 	)
 	if err != nil {
@@ -2638,6 +2646,11 @@ func (s *SQLiteStore) UpdateUser(ctx context.Context, user *store.User) error {
 		return store.ErrNotFound
 	}
 	return nil
+}
+
+func (s *SQLiteStore) UpdateUserLastSeen(ctx context.Context, id string, t time.Time) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE users SET last_seen = ? WHERE id = ?`, t, id)
+	return err
 }
 
 func (s *SQLiteStore) DeleteUser(ctx context.Context, id string) error {
@@ -2685,7 +2698,7 @@ func (s *SQLiteStore) ListUsers(ctx context.Context, filter store.UserFilter, op
 	}
 
 	query := fmt.Sprintf(`
-		SELECT id, email, display_name, avatar_url, role, status, preferences, created_at, last_login
+		SELECT id, email, display_name, avatar_url, role, status, preferences, created_at, last_login, last_seen
 		FROM users %s ORDER BY created_at DESC LIMIT ?
 	`, whereClause)
 	args = append(args, limit)
@@ -2700,17 +2713,20 @@ func (s *SQLiteStore) ListUsers(ctx context.Context, filter store.UserFilter, op
 	for rows.Next() {
 		var user store.User
 		var preferences string
-		var lastLogin sql.NullTime
+		var lastLogin, lastSeen sql.NullTime
 
 		if err := rows.Scan(
 			&user.ID, &user.Email, &user.DisplayName, &user.AvatarURL, &user.Role, &user.Status,
-			&preferences, &user.Created, &lastLogin,
+			&preferences, &user.Created, &lastLogin, &lastSeen,
 		); err != nil {
 			return nil, err
 		}
 
 		if lastLogin.Valid {
 			user.LastLogin = lastLogin.Time
+		}
+		if lastSeen.Valid {
+			user.LastSeen = lastSeen.Time
 		}
 		unmarshalJSON(preferences, &user.Preferences)
 
