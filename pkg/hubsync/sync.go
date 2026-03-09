@@ -429,7 +429,7 @@ func EnsureHubReady(grovePath string, opts EnsureHubReadyOptions) (*HubContext, 
 	} else {
 		// Already in sync — update the watermark and synced agents to keep current
 		UpdateLastSyncedAt(hubCtx.GrovePath, syncResult.ServerTime, hubCtx.IsGlobal)
-		UpdateSyncedAgents(hubCtx.GrovePath, collectHubAgentNames(syncResult))
+		UpdateSyncedAgents(hubCtx.GrovePath, collectSyncedAgentNames(syncResult))
 	}
 
 	return hubCtx, nil
@@ -869,15 +869,19 @@ func ExecuteSync(ctx context.Context, hubCtx *HubContext, result *SyncResult, au
 
 	// Record the set of agents now known to be on the hub for this broker.
 	// After sync: InSync + newly registered + RemoteOnly + Pending are all on hub.
-	UpdateSyncedAgents(hubCtx.GrovePath, collectHubAgentNames(result))
+	UpdateSyncedAgents(hubCtx.GrovePath, collectSyncedAgentNames(result))
 
 	return nil
 }
 
-// collectHubAgentNames returns the names of all agents expected to be on the
-// hub after a successful sync: InSync + ToRegister (now registered) +
-// RemoteOnly + Pending.
-func collectHubAgentNames(result *SyncResult) []string {
+// collectSyncedAgentNames returns the names of all agents that should be
+// remembered as "previously synced" in state.yaml. This includes agents
+// currently on the hub (InSync, ToRegister, RemoteOnly, Pending) as well as
+// StaleLocal agents — local artifacts whose hub record was deleted but whose
+// local files have not yet been cleaned up. Keeping StaleLocal agents in the
+// list prevents them from being misclassified as new local agents on the next
+// sync check.
+func collectSyncedAgentNames(result *SyncResult) []string {
 	seen := make(map[string]bool)
 	for _, name := range result.InSync {
 		seen[name] = true
@@ -890,6 +894,9 @@ func collectHubAgentNames(result *SyncResult) []string {
 	}
 	for _, ref := range result.Pending {
 		seen[ref.Name] = true
+	}
+	for _, name := range result.StaleLocal {
+		seen[name] = true
 	}
 	names := make([]string, 0, len(seen))
 	for name := range seen {

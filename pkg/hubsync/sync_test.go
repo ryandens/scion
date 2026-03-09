@@ -1731,6 +1731,127 @@ func TestUpdateSyncedAgents(t *testing.T) {
 	}
 }
 
+// TestCollectSyncedAgentNames_IncludesStaleLocal verifies that
+// collectSyncedAgentNames includes StaleLocal agents so they remain in the
+// SyncedAgents list. This prevents the regression where hub-deleted agents
+// lose their "previously synced" status after one sync cycle, causing them
+// to be re-proposed for registration on the next check.
+func TestCollectSyncedAgentNames_IncludesStaleLocal(t *testing.T) {
+	result := &SyncResult{
+		InSync:     []string{"agent-a", "agent-b"},
+		StaleLocal: []string{"deleted-from-hub-1", "deleted-from-hub-2"},
+	}
+
+	names := collectSyncedAgentNames(result)
+
+	nameSet := make(map[string]bool, len(names))
+	for _, n := range names {
+		nameSet[n] = true
+	}
+
+	for _, expected := range []string{"agent-a", "agent-b", "deleted-from-hub-1", "deleted-from-hub-2"} {
+		if !nameSet[expected] {
+			t.Fatalf("expected %q in collectSyncedAgentNames result, got %v", expected, names)
+		}
+	}
+}
+
+// TestStaleLocalAgentSurvivesSyncCycle verifies the full regression scenario:
+// an agent deleted from the hub is correctly classified as StaleLocal across
+// multiple sync cycles, rather than being reclassified as ToRegister after the
+// SyncedAgents list is updated.
+func TestStaleLocalAgentSurvivesSyncCycle(t *testing.T) {
+	groveID := "test-grove-id"
+	brokerID := "test-broker-id"
+	watermark := time.Date(2026, 3, 3, 12, 0, 0, 0, time.UTC)
+
+	tmpDir := t.TempDir()
+
+	// Create two local agents: one still on hub, one deleted from hub
+	for _, name := range []string{"in-sync-agent", "deleted-agent"} {
+		agentDir := filepath.Join(tmpDir, "agents", name)
+		if err := os.MkdirAll(agentDir, 0755); err != nil {
+			t.Fatalf("failed to create agent dir: %v", err)
+		}
+		configPath := filepath.Join(agentDir, "scion-agent.json")
+		if err := os.WriteFile(configPath, []byte(`{"harness":"claude"}`), 0644); err != nil {
+			t.Fatalf("failed to write scion-agent.json: %v", err)
+		}
+		// Set mtime after watermark so timestamp check alone would classify as ToRegister
+		newerTime := watermark.Add(time.Hour)
+		if err := os.Chtimes(configPath, newerTime, newerTime); err != nil {
+			t.Fatalf("failed to set config mtime: %v", err)
+		}
+	}
+
+	// Initial state: both agents were previously synced
+	if err := config.SaveGroveState(tmpDir, &config.GroveState{
+		LastSyncedAt: watermark.Format(time.RFC3339Nano),
+		SyncedAgents: []string{"deleted-agent", "in-sync-agent"},
+	}); err != nil {
+		t.Fatalf("failed to save state.yaml: %v", err)
+	}
+
+	// Hub only returns in-sync-agent (deleted-agent was removed from hub)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/agents") {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"agents": []map[string]interface{}{
+					{"name": "in-sync-agent", "id": "uuid-1", "status": "running",
+						"runtimeBrokerId": brokerID, "created": watermark.Add(-time.Hour).Format(time.RFC3339Nano)},
+				},
+				"serverTime": time.Now().UTC().Format(time.RFC3339Nano),
+				"totalCount": 1,
+				"nextCursor": "",
+			})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	client, err := hubclient.New(server.URL)
+	if err != nil {
+		t.Fatalf("failed to create hub client: %v", err)
+	}
+	hubCtx := &HubContext{
+		Client:    client,
+		GroveID:   groveID,
+		BrokerID:  brokerID,
+		GrovePath: tmpDir,
+		Settings:  &config.Settings{},
+	}
+
+	// --- First sync cycle ---
+	result, err := CompareAgents(context.Background(), hubCtx)
+	if err != nil {
+		t.Fatalf("CompareAgents (cycle 1) failed: %v", err)
+	}
+	if len(result.StaleLocal) != 1 || result.StaleLocal[0] != "deleted-agent" {
+		t.Fatalf("cycle 1: expected deleted-agent in StaleLocal, got %v", result.StaleLocal)
+	}
+	if len(result.ToRegister) != 0 {
+		t.Fatalf("cycle 1: expected no ToRegister, got %v", result.ToRegister)
+	}
+
+	// Simulate what EnsureHubReady does when IsInSync: update SyncedAgents
+	UpdateSyncedAgents(tmpDir, collectSyncedAgentNames(result))
+
+	// --- Second sync cycle ---
+	result2, err := CompareAgents(context.Background(), hubCtx)
+	if err != nil {
+		t.Fatalf("CompareAgents (cycle 2) failed: %v", err)
+	}
+	if len(result2.StaleLocal) != 1 || result2.StaleLocal[0] != "deleted-agent" {
+		t.Fatalf("cycle 2: expected deleted-agent still in StaleLocal, got StaleLocal=%v ToRegister=%v",
+			result2.StaleLocal, result2.ToRegister)
+	}
+	if len(result2.ToRegister) != 0 {
+		t.Fatalf("cycle 2: expected no ToRegister, got %v (this is the regression)", result2.ToRegister)
+	}
+}
+
 // TestAddRemoveSyncedAgent verifies individual add/remove operations.
 func TestAddRemoveSyncedAgent(t *testing.T) {
 	tmpDir := t.TempDir()
