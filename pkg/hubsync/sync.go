@@ -211,9 +211,19 @@ func EnsureHubReady(grovePath string, opts EnsureHubReadyOptions) (*HubContext, 
 			"  - Or set hub.local_only=false to enable Hub sync checks")
 	}
 
-	// Check if hub is explicitly enabled
-	if !settings.IsHubEnabled() {
+	// Check if hub is explicitly enabled via settings OR if we're inside
+	// a hub-connected container (env vars like SCION_HUB_ENDPOINT are set).
+	// Inside containers, hub.enabled is not written to settings files, but
+	// the hub env vars signal that the Hub API should be used.
+	hubContext := config.IsHubContext()
+	if !settings.IsHubEnabled() && !hubContext {
 		return nil, nil
+	}
+
+	// When running inside a hub-connected container, always skip sync checks —
+	// containers cannot register groves or reconcile agents.
+	if hubContext {
+		opts.SkipSync = true
 	}
 
 	// Hub is enabled - from here on, any failure is an error (no silent fallback)
@@ -225,15 +235,23 @@ func EnsureHubReady(grovePath string, opts EnsureHubReadyOptions) (*HubContext, 
 	// Ensure grove_id exists
 	groveID := settings.GroveID
 	if groveID == "" {
-		// Generate grove_id for groves that don't have one
-		groveID = config.GenerateGroveIDForDir(filepath.Dir(resolvedPath))
-		if err := config.UpdateSetting(resolvedPath, "grove_id", groveID, isGlobal); err != nil {
-			return nil, fmt.Errorf("failed to save grove_id: %w", err)
-		}
-		// Reload settings to get the updated grove_id
-		settings, err = config.LoadSettings(resolvedPath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to reload settings: %w", err)
+		if hubContext {
+			// Inside a container without SCION_GROVE_ID — we can't generate
+			// and persist a grove ID. Use a placeholder so the Hub client
+			// can still be constructed, but grove-scoped operations will
+			// not work without a real grove ID.
+			debugf("hub context without grove_id — grove-scoped operations may fail")
+		} else {
+			// Generate grove_id for groves that don't have one
+			groveID = config.GenerateGroveIDForDir(filepath.Dir(resolvedPath))
+			if err := config.UpdateSetting(resolvedPath, "grove_id", groveID, isGlobal); err != nil {
+				return nil, fmt.Errorf("failed to save grove_id: %w", err)
+			}
+			// Reload settings to get the updated grove_id
+			settings, err = config.LoadSettings(resolvedPath)
+			if err != nil {
+				return nil, fmt.Errorf("failed to reload settings: %w", err)
+			}
 		}
 	}
 
@@ -269,6 +287,13 @@ func EnsureHubReady(grovePath string, opts EnsureHubReadyOptions) (*HubContext, 
 
 	debugf("HubContext created: endpoint=%s, groveID=%s, brokerID=%s, grovePath=%s, isGlobal=%v",
 		endpoint, groveID, brokerID, resolvedPath, isGlobal)
+
+	// Inside a hub-connected container, skip grove registration, provider path,
+	// and sync checks — the container should only query the Hub API, not manage
+	// grove state. Return the context directly.
+	if hubContext {
+		return hubCtx, nil
+	}
 
 	// Check grove registration
 	registered, err := isGroveRegistered(ctx, hubCtx)

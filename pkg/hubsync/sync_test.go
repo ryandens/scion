@@ -151,6 +151,147 @@ func TestEnsureHubReady_GlobalFallbackWithHubDisabled(t *testing.T) {
 	}
 }
 
+func TestEnsureHubReady_HubContextEnvVars(t *testing.T) {
+	// When hub.enabled is NOT set in settings but SCION_HUB_ENDPOINT env var
+	// is present (inside a hub-connected container), EnsureHubReady should
+	// return a valid hub context via the env var detection path.
+
+	groveID := "container-grove-id"
+
+	// Set up a mock hub server
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/healthz":
+			json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	// Create a temp HOME with global .scion directory but NO hub.enabled
+	tmpHome := t.TempDir()
+	globalDir := filepath.Join(tmpHome, ".scion")
+	if err := os.MkdirAll(globalDir, 0755); err != nil {
+		t.Fatalf("Failed to create global dir: %v", err)
+	}
+
+	// Write minimal settings — hub.enabled is intentionally NOT set
+	settingsContent := `runtime: docker
+`
+	if err := os.WriteFile(filepath.Join(globalDir, "settings.yaml"), []byte(settingsContent), 0644); err != nil {
+		t.Fatalf("Failed to write settings: %v", err)
+	}
+
+	t.Setenv("HOME", tmpHome)
+	// Simulate container env vars
+	t.Setenv("SCION_HUB_ENDPOINT", server.URL)
+	t.Setenv("SCION_HUB_URL", "")
+	t.Setenv("SCION_GROVE_ID", groveID)
+	t.Setenv("SCION_AUTH_TOKEN", "test-agent-token")
+	t.Setenv("SCION_DEV_TOKEN", "")
+
+	// Change to tmpHome so FindProjectRoot() falls back to global
+	origDir, _ := os.Getwd()
+	if err := os.Chdir(tmpHome); err != nil {
+		t.Fatalf("Failed to chdir: %v", err)
+	}
+	defer os.Chdir(origDir)
+
+	hubCtx, err := EnsureHubReady("", EnsureHubReadyOptions{
+		AutoConfirm: true,
+	})
+	if err != nil {
+		t.Fatalf("EnsureHubReady returned error: %v", err)
+	}
+	if hubCtx == nil {
+		t.Fatal("EnsureHubReady returned nil; expected hub context when SCION_HUB_ENDPOINT is set")
+	}
+	if hubCtx.Endpoint != server.URL {
+		t.Errorf("Endpoint = %q, want %q", hubCtx.Endpoint, server.URL)
+	}
+	if hubCtx.GroveID != groveID {
+		t.Errorf("GroveID = %q, want %q", hubCtx.GroveID, groveID)
+	}
+}
+
+func TestEnsureHubReady_HubContextSkipsSyncAndRegistration(t *testing.T) {
+	// When running in hub context (container), EnsureHubReady should skip
+	// grove registration and sync checks. Verify that no registration or
+	// sync API calls are made.
+
+	groveID := "container-grove-id-2"
+	registrationCalled := false
+	syncCalled := false
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/healthz":
+			json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+		case r.URL.Path == "/api/v1/groves/"+groveID:
+			// Grove lookup — should not reach here in container context
+			registrationCalled = true
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"id":   groveID,
+				"name": "test-grove",
+			})
+		case strings.Contains(r.URL.Path, "/agents"):
+			syncCalled = true
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"agents":     []interface{}{},
+				"serverTime": time.Now().UTC().Format(time.RFC3339Nano),
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	tmpHome := t.TempDir()
+	globalDir := filepath.Join(tmpHome, ".scion")
+	if err := os.MkdirAll(globalDir, 0755); err != nil {
+		t.Fatalf("Failed to create global dir: %v", err)
+	}
+
+	// No hub.enabled in settings
+	if err := os.WriteFile(filepath.Join(globalDir, "settings.yaml"), []byte("runtime: docker\n"), 0644); err != nil {
+		t.Fatalf("Failed to write settings: %v", err)
+	}
+
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("SCION_HUB_ENDPOINT", server.URL)
+	t.Setenv("SCION_HUB_URL", "")
+	t.Setenv("SCION_GROVE_ID", groveID)
+	t.Setenv("SCION_AUTH_TOKEN", "test-agent-token")
+	t.Setenv("SCION_DEV_TOKEN", "")
+
+	origDir, _ := os.Getwd()
+	if err := os.Chdir(tmpHome); err != nil {
+		t.Fatalf("Failed to chdir: %v", err)
+	}
+	defer os.Chdir(origDir)
+
+	hubCtx, err := EnsureHubReady("", EnsureHubReadyOptions{
+		AutoConfirm: true,
+		// Intentionally NOT setting SkipSync — should be forced by hub context
+	})
+	if err != nil {
+		t.Fatalf("EnsureHubReady returned error: %v", err)
+	}
+	if hubCtx == nil {
+		t.Fatal("EnsureHubReady returned nil")
+	}
+
+	if registrationCalled {
+		t.Error("Grove registration API was called; should be skipped in hub context")
+	}
+	if syncCalled {
+		t.Error("Sync API was called; should be skipped in hub context")
+	}
+}
+
 func TestSyncResult_IsInSync(t *testing.T) {
 	tests := []struct {
 		name     string

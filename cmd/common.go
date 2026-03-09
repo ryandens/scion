@@ -262,8 +262,9 @@ func CheckHubAvailabilitySimple(grovePath string) (*HubContext, error) {
 			"  - Or set hub.local_only=false to enable Hub sync checks")
 	}
 
-	// Check if hub is explicitly enabled
-	if !settings.IsHubEnabled() {
+	// Check if hub is explicitly enabled via settings OR if we're inside
+	// a hub-connected container (env vars like SCION_HUB_ENDPOINT are set).
+	if !settings.IsHubEnabled() && !config.IsHubContext() {
 		return nil, nil
 	}
 
