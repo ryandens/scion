@@ -281,12 +281,12 @@ func TestGitUtils(t *testing.T) {
 			remote string
 			want   string
 		}{
-			{"https://github.com/GoogleCloudPlatform/scion.git", "github.com/GoogleCloudPlatform/scion"},
-			{"http://github.com/GoogleCloudPlatform/scion.git", "github.com/GoogleCloudPlatform/scion"},
-			{"git@github.com:GoogleCloudPlatform/scion.git", "github.com/GoogleCloudPlatform/scion"},
-			{"github.com/GoogleCloudPlatform/scion.git", "github.com/GoogleCloudPlatform/scion"},
-			{"git@github.com:GoogleCloudPlatform/scion", "github.com/GoogleCloudPlatform/scion"},
-			{"HTTPS://github.com/GoogleCloudPlatform/scion.GIT", "github.com/GoogleCloudPlatform/scion"},
+			{"https://github.com/GoogleCloudPlatform/scion.git", "github.com/googlecloudplatform/scion"},
+			{"http://github.com/GoogleCloudPlatform/scion.git", "github.com/googlecloudplatform/scion"},
+			{"git@github.com:GoogleCloudPlatform/scion.git", "github.com/googlecloudplatform/scion"},
+			{"github.com/GoogleCloudPlatform/scion.git", "github.com/googlecloudplatform/scion"},
+			{"git@github.com:GoogleCloudPlatform/scion", "github.com/googlecloudplatform/scion"},
+			{"HTTPS://github.com/GoogleCloudPlatform/scion.GIT", "github.com/googlecloudplatform/scion"},
 			{"", ""},
 		}
 
