@@ -500,17 +500,17 @@ The design places commands under `scion notifications` (top-level). An alternati
 5. ✅ Move `scion hub notifications` / `scion hub notifications ack` to the new `scion notifications` group (old commands deprecated with redirects)
 6. ✅ Write CLI integration tests
 
-### Phase 3: Web UX
+### Phase 3: Web UX ✅ COMPLETE
 **Goal**: Users can manage subscriptions and see subscription context in the browser.
 
 **Tasks:**
-1. Add `Subscription` type to `web/src/shared/types.ts`
-2. Create `subscription-manager.ts` shared component (CRUD table + dialog)
-3. Add "Subscribe" bell button to agent detail page header
-4. Add "Notification Subscriptions" section to grove detail page
-5. Add "Manage subscriptions" link to notification tray popover
-6. Wire up SSE events for real-time subscription state updates (optional)
-7. Add scope indicator to notification tray items
+1. ✅ Add `Subscription` type to `web/src/shared/types.ts`
+2. ✅ Create `subscription-manager.ts` shared component (CRUD table + dialog)
+3. ✅ Add "Subscribe" bell button to agent detail page header
+4. ✅ Add "Notification Subscriptions" section to grove detail page
+5. ✅ Add "Manage subscriptions" link to notification tray popover
+6. Wire up SSE events for real-time subscription state updates (deferred — optional)
+7. ✅ Add scope indicator styles to notification tray (scope data in notification payloads deferred to Phase 4)
 
 ### Phase 4: Polish & Extensions (Future)
 **Goal**: Refinements based on usage feedback.
