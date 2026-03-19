@@ -199,6 +199,29 @@ interface ReloadResult {
   error?: string;
 }
 
+interface GitHubInstallationInfo {
+  installation_id: number;
+  account_login: string;
+  account_type: string;
+  repositories: string[];
+  status: string;
+}
+
+interface RateLimitInfo {
+  limit: number;
+  remaining: number;
+  reset: string;
+  used: number;
+}
+
+interface GitHubAppConfigData {
+  app_id: number;
+  api_base_url?: string;
+  webhooks_enabled: boolean;
+  configured: boolean;
+  rate_limit?: RateLimitInfo;
+}
+
 @customElement('scion-page-admin-server-config')
 export class ScionPageAdminServerConfig extends LitElement {
   @state() private loading = true;
@@ -290,6 +313,18 @@ export class ScionPageAdminServerConfig extends LitElement {
   // Message Broker
   @state() private messageBrokerEnabled = false;
   @state() private messageBrokerType = '';
+
+  // GitHub App
+  @state() private githubAppConfigured = false;
+  @state() private githubAppId = 0;
+  @state() private githubAppApiBaseUrl = '';
+  @state() private githubAppWebhooksEnabled = false;
+  @state() private githubAppInstallations: GitHubInstallationInfo[] = [];
+  @state() private githubAppInstallationsLoading = false;
+  @state() private githubAppSyncLoading = false;
+  @state() private githubAppSyncResult: string | null = null;
+  @state() private githubAppDiscoverLoading = false;
+  @state() private githubAppRateLimit: RateLimitInfo | null = null;
 
   // Keep raw data for sections we don't fully edit
   private rawConfig: ServerConfigResponse | null = null;
@@ -514,6 +549,8 @@ export class ScionPageAdminServerConfig extends LitElement {
   override connectedCallback(): void {
     super.connectedCallback();
     void this.loadConfig();
+    void this.loadGitHubAppConfig();
+    void this.loadGitHubAppInstallations();
   }
 
   private async loadConfig(): Promise<void> {
@@ -890,6 +927,9 @@ export class ScionPageAdminServerConfig extends LitElement {
         <sl-tab slot="nav" panel="telemetry" ?active=${this.activeTab === 'telemetry'}
           >Telemetry</sl-tab
         >
+        <sl-tab slot="nav" panel="github-app" ?active=${this.activeTab === 'github-app'}
+          >GitHub App</sl-tab
+        >
 
         <sl-tab-panel name="general">${this.renderGeneralTab()}</sl-tab-panel>
         <sl-tab-panel name="hub-server">${this.renderHubServerTab()}</sl-tab-panel>
@@ -897,6 +937,7 @@ export class ScionPageAdminServerConfig extends LitElement {
         <sl-tab-panel name="data">${this.renderDataTab()}</sl-tab-panel>
         <sl-tab-panel name="auth">${this.renderAuthTab()}</sl-tab-panel>
         <sl-tab-panel name="telemetry">${this.renderTelemetryTab()}</sl-tab-panel>
+        <sl-tab-panel name="github-app">${this.renderGitHubAppTab()}</sl-tab-panel>
       </sl-tab-group>
 
       <div class="actions">
@@ -1698,6 +1739,171 @@ export class ScionPageAdminServerConfig extends LitElement {
         </div>
       </div>
     `;
+  }
+
+  // ── GitHub App Tab ──
+
+  private renderGitHubAppTab() {
+    return html`
+      <div class="section">
+        <h3 class="section-title">GitHub App Configuration</h3>
+        ${this.githubAppConfigured
+          ? html`
+              <div class="form-grid">
+                <div class="form-field">
+                  <label>App ID</label>
+                  <span class="hint">GitHub App ID (read-only)</span>
+                  <sl-input value=${String(this.githubAppId)} disabled></sl-input>
+                </div>
+                <div class="form-field">
+                  <label>API Base URL</label>
+                  <span class="hint">GitHub API endpoint (default: api.github.com)</span>
+                  <sl-input value=${this.githubAppApiBaseUrl || 'https://api.github.com'} disabled></sl-input>
+                </div>
+                <div class="form-field">
+                  <label>Webhooks</label>
+                  <sl-switch ?checked=${this.githubAppWebhooksEnabled} disabled>
+                    ${this.githubAppWebhooksEnabled ? 'Enabled' : 'Disabled'}
+                  </sl-switch>
+                </div>
+              </div>
+              ${this.githubAppRateLimit ? html`
+                <div style="margin-top: 1rem;">
+                  <span class="hint">Rate Limit</span>
+                  <div style="font-size: 0.875rem; margin-top: 0.25rem;">
+                    ${this.githubAppRateLimit.remaining}/${this.githubAppRateLimit.limit} remaining
+                    ${this.githubAppRateLimit.remaining < this.githubAppRateLimit.limit / 5
+                      ? html`<span style="color: var(--sl-color-danger-600);">  (low)</span>`
+                      : ''}
+                  </div>
+                </div>
+              ` : ''}
+            `
+          : html`
+              <p style="color: var(--scion-text-muted, #64748b);">
+                GitHub App is not configured. Configure the App ID and private key in settings.yaml to enable GitHub App authentication for agents.
+              </p>
+            `}
+      </div>
+
+      ${this.githubAppConfigured ? html`
+        <div class="section">
+          <h3 class="section-title">Installations</h3>
+          <div style="display: flex; gap: 0.5rem; margin-bottom: 1rem;">
+            <sl-button size="small" variant="default"
+              ?loading=${this.githubAppDiscoverLoading}
+              @click=${() => this.handleGitHubAppDiscover()}>
+              <sl-icon slot="prefix" name="arrow-clockwise"></sl-icon>
+              Discover from GitHub
+            </sl-button>
+            <sl-button size="small" variant="default"
+              ?loading=${this.githubAppSyncLoading}
+              @click=${() => this.handleGitHubAppSyncPermissions()}>
+              <sl-icon slot="prefix" name="shield-check"></sl-icon>
+              Sync Permissions
+            </sl-button>
+          </div>
+
+          ${this.githubAppSyncResult ? html`
+            <div class="status-message success">${this.githubAppSyncResult}</div>
+          ` : ''}
+
+          ${this.githubAppInstallationsLoading
+            ? html`<div style="text-align: center; padding: 1rem;"><sl-spinner></sl-spinner></div>`
+            : this.githubAppInstallations.length === 0
+              ? html`<p style="color: var(--scion-text-muted);">No installations found. Click "Discover from GitHub" to sync.</p>`
+              : html`
+                  <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                    ${this.githubAppInstallations.map(inst => html`
+                      <div style="display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem; background: var(--scion-bg-subtle, #f8fafc); border: 1px solid var(--scion-border, #e2e8f0); border-radius: var(--scion-radius, 0.5rem);">
+                        <sl-icon name=${inst.account_type === 'Organization' ? 'building' : 'person'}></sl-icon>
+                        <div style="flex: 1;">
+                          <strong>${inst.account_login}</strong>
+                          <div style="font-size: 0.75rem; color: var(--scion-text-muted);">
+                            ${inst.account_type} · ${inst.repositories?.length || 0} repos · ID: ${inst.installation_id}
+                          </div>
+                        </div>
+                        <span style="font-size: 0.6875rem; padding: 0.125rem 0.5rem; border-radius: 9999px; background: ${inst.status === 'active' ? '#dcfce7' : '#fef2f2'}; color: ${inst.status === 'active' ? '#166534' : '#991b1b'};">
+                          ${inst.status}
+                        </span>
+                      </div>
+                    `)}
+                  </div>
+                `}
+        </div>
+      ` : ''}
+    `;
+  }
+
+  private async loadGitHubAppConfig(): Promise<void> {
+    try {
+      const res = await apiFetch('/api/v1/github-app');
+      if (res.ok) {
+        const data = (await res.json()) as GitHubAppConfigData;
+        this.githubAppConfigured = data.configured;
+        this.githubAppId = data.app_id;
+        this.githubAppApiBaseUrl = data.api_base_url || '';
+        this.githubAppWebhooksEnabled = data.webhooks_enabled;
+        this.githubAppRateLimit = data.rate_limit || null;
+      }
+    } catch (e) {
+      // Non-critical — tab just shows unconfigured state
+    }
+  }
+
+  private async loadGitHubAppInstallations(): Promise<void> {
+    this.githubAppInstallationsLoading = true;
+    try {
+      const res = await apiFetch('/api/v1/github-app/installations');
+      if (res.ok) {
+        const data = (await res.json()) as { installations: GitHubInstallationInfo[] };
+        this.githubAppInstallations = data.installations || [];
+      }
+    } catch (e) {
+      // Non-critical
+    } finally {
+      this.githubAppInstallationsLoading = false;
+    }
+  }
+
+  private async handleGitHubAppDiscover(): Promise<void> {
+    this.githubAppDiscoverLoading = true;
+    this.githubAppSyncResult = null;
+    try {
+      const res = await apiFetch('/api/v1/github-app/installations/discover', { method: 'POST' });
+      if (res.ok) {
+        const data = (await res.json()) as { total: number };
+        this.githubAppSyncResult = `Discovered ${data.total} installation(s) from GitHub.`;
+        await this.loadGitHubAppInstallations();
+      } else {
+        const err = (await res.json().catch(() => ({}))) as { message?: string };
+        this.githubAppSyncResult = `Discovery failed: ${err.message || res.statusText}`;
+      }
+    } catch (e) {
+      this.githubAppSyncResult = 'Discovery failed: network error';
+    } finally {
+      this.githubAppDiscoverLoading = false;
+    }
+  }
+
+  private async handleGitHubAppSyncPermissions(): Promise<void> {
+    this.githubAppSyncLoading = true;
+    this.githubAppSyncResult = null;
+    try {
+      const res = await apiFetch('/api/v1/github-app/sync-permissions', { method: 'POST' });
+      if (res.ok) {
+        const data = (await res.json()) as { affected_groves?: number; app_permissions?: Record<string, string> };
+        const perms = data.app_permissions ? Object.entries(data.app_permissions).map(([k, v]) => `${k}:${v}`).join(', ') : 'none';
+        this.githubAppSyncResult = `Permissions synced. App permissions: ${perms}. ${data.affected_groves || 0} grove(s) affected.`;
+      } else {
+        const err = (await res.json().catch(() => ({}))) as { message?: string };
+        this.githubAppSyncResult = `Sync failed: ${err.message || res.statusText}`;
+      }
+    } catch (e) {
+      this.githubAppSyncResult = 'Sync failed: network error';
+    } finally {
+      this.githubAppSyncLoading = false;
+    }
   }
 }
 

@@ -110,6 +110,7 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		migrationV33,
 		migrationV34,
 		migrationV35,
+		migrationV36,
 	}
 
 	// Create migrations table if not exists
@@ -843,6 +844,11 @@ CREATE INDEX IF NOT EXISTS idx_github_installations_status ON github_installatio
 ALTER TABLE groves ADD COLUMN github_installation_id INTEGER;
 ALTER TABLE groves ADD COLUMN github_permissions TEXT;
 ALTER TABLE groves ADD COLUMN github_app_status TEXT;
+`
+
+// Migration V36: Git identity configuration for commit attribution.
+const migrationV36 = `
+ALTER TABLE groves ADD COLUMN git_identity TEXT;
 `
 
 // Helper functions for JSON marshaling/unmarshaling
@@ -1585,13 +1591,14 @@ func (s *SQLiteStore) CreateGrove(ctx context.Context, grove *store.Grove) error
 	grove.Updated = now
 
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO groves (id, name, slug, git_remote, default_runtime_broker_id, labels, annotations, shared_dirs, created_at, updated_at, created_by, owner_id, visibility, github_installation_id, github_permissions, github_app_status)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO groves (id, name, slug, git_remote, default_runtime_broker_id, labels, annotations, shared_dirs, created_at, updated_at, created_by, owner_id, visibility, github_installation_id, github_permissions, github_app_status, git_identity)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		grove.ID, grove.Name, grove.Slug, nullableString(grove.GitRemote), nullableString(grove.DefaultRuntimeBrokerID),
 		marshalJSON(grove.Labels), marshalJSON(grove.Annotations), marshalJSON(grove.SharedDirs),
 		grove.Created, grove.Updated, grove.CreatedBy, grove.OwnerID, grove.Visibility,
 		nullableInt64(grove.GitHubInstallationID), marshalJSONPtr(grove.GitHubPermissions), marshalJSONPtr(grove.GitHubAppStatus),
+		marshalJSONPtr(grove.GitIdentity),
 	)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
@@ -1607,16 +1614,16 @@ func (s *SQLiteStore) GetGrove(ctx context.Context, id string) (*store.Grove, er
 	var labels, annotations, sharedDirs string
 	var gitRemote, defaultRuntimeBrokerID sql.NullString
 	var githubInstallationID sql.NullInt64
-	var githubPermissions, githubAppStatus string
+	var githubPermissions, githubAppStatus, gitIdentity string
 
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, name, slug, git_remote, default_runtime_broker_id, labels, annotations, shared_dirs, created_at, updated_at, created_by, owner_id, visibility, github_installation_id, COALESCE(github_permissions, ''), COALESCE(github_app_status, '')
+		SELECT id, name, slug, git_remote, default_runtime_broker_id, labels, annotations, shared_dirs, created_at, updated_at, created_by, owner_id, visibility, github_installation_id, COALESCE(github_permissions, ''), COALESCE(github_app_status, ''), COALESCE(git_identity, '')
 		FROM groves WHERE id = ?
 	`, id).Scan(
 		&grove.ID, &grove.Name, &grove.Slug, &gitRemote, &defaultRuntimeBrokerID,
 		&labels, &annotations, &sharedDirs,
 		&grove.Created, &grove.Updated, &grove.CreatedBy, &grove.OwnerID, &grove.Visibility,
-		&githubInstallationID, &githubPermissions, &githubAppStatus,
+		&githubInstallationID, &githubPermissions, &githubAppStatus, &gitIdentity,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -1645,6 +1652,10 @@ func (s *SQLiteStore) GetGrove(ctx context.Context, id string) (*store.Grove, er
 	if githubAppStatus != "" {
 		grove.GitHubAppStatus = &store.GitHubAppGroveStatus{}
 		unmarshalJSON(githubAppStatus, grove.GitHubAppStatus)
+	}
+	if gitIdentity != "" {
+		grove.GitIdentity = &store.GitIdentityConfig{}
+		unmarshalJSON(gitIdentity, grove.GitIdentity)
 	}
 
 	// Populate computed fields
@@ -1719,13 +1730,15 @@ func (s *SQLiteStore) UpdateGrove(ctx context.Context, grove *store.Grove) error
 			name = ?, slug = ?, git_remote = ?, default_runtime_broker_id = ?,
 			labels = ?, annotations = ?, shared_dirs = ?,
 			updated_at = ?, owner_id = ?, visibility = ?,
-			github_installation_id = ?, github_permissions = ?, github_app_status = ?
+			github_installation_id = ?, github_permissions = ?, github_app_status = ?,
+			git_identity = ?
 		WHERE id = ?
 	`,
 		grove.Name, grove.Slug, nullableString(grove.GitRemote), nullableString(grove.DefaultRuntimeBrokerID),
 		marshalJSON(grove.Labels), marshalJSON(grove.Annotations), marshalJSON(grove.SharedDirs),
 		grove.Updated, grove.OwnerID, grove.Visibility,
 		nullableInt64(grove.GitHubInstallationID), marshalJSONPtr(grove.GitHubPermissions), marshalJSONPtr(grove.GitHubAppStatus),
+		marshalJSONPtr(grove.GitIdentity),
 		grove.ID,
 	)
 	if err != nil {
@@ -1817,7 +1830,7 @@ func (s *SQLiteStore) ListGroves(ctx context.Context, filter store.GroveFilter, 
 
 	query := fmt.Sprintf(`
 		SELECT id, name, slug, git_remote, default_runtime_broker_id, labels, annotations, shared_dirs, created_at, updated_at, created_by, owner_id, visibility,
-		       github_installation_id, COALESCE(github_permissions, ''), COALESCE(github_app_status, '')
+		       github_installation_id, COALESCE(github_permissions, ''), COALESCE(github_app_status, ''), COALESCE(git_identity, '')
 		FROM groves %s ORDER BY created_at DESC LIMIT ?
 	`, whereClause)
 	args = append(args, limit)
@@ -1839,6 +1852,7 @@ func (s *SQLiteStore) ListGroves(ctx context.Context, filter store.GroveFilter, 
 		githubInstallationID sql.NullInt64
 		githubPermissions    string
 		githubAppStatus      string
+		gitIdentity          string
 	}
 	var rowData []groveRow
 
@@ -1848,7 +1862,7 @@ func (s *SQLiteStore) ListGroves(ctx context.Context, filter store.GroveFilter, 
 			&r.grove.ID, &r.grove.Name, &r.grove.Slug, &r.gitRemote, &r.brokerID,
 			&r.labels, &r.annotations, &r.sharedDirs,
 			&r.grove.Created, &r.grove.Updated, &r.grove.CreatedBy, &r.grove.OwnerID, &r.grove.Visibility,
-			&r.githubInstallationID, &r.githubPermissions, &r.githubAppStatus,
+			&r.githubInstallationID, &r.githubPermissions, &r.githubAppStatus, &r.gitIdentity,
 		); err != nil {
 			return nil, err
 		}
@@ -1878,6 +1892,10 @@ func (s *SQLiteStore) ListGroves(ctx context.Context, filter store.GroveFilter, 
 		if r.githubAppStatus != "" {
 			grove.GitHubAppStatus = &store.GitHubAppGroveStatus{}
 			unmarshalJSON(r.githubAppStatus, grove.GitHubAppStatus)
+		}
+		if r.gitIdentity != "" {
+			grove.GitIdentity = &store.GitIdentityConfig{}
+			unmarshalJSON(r.gitIdentity, grove.GitIdentity)
 		}
 
 		// Populate computed fields - these now have a connection available

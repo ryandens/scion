@@ -174,6 +174,9 @@ type Grove struct {
 	GitHubPermissions    *GitHubTokenPermissions `json:"githubPermissions,omitempty"`
 	GitHubAppStatus      *GitHubAppGroveStatus   `json:"githubAppStatus,omitempty"`
 
+	// Git commit attribution (used when GitHub App generates commits)
+	GitIdentity *GitIdentityConfig `json:"gitIdentity,omitempty"`
+
 	// Computed fields (not stored, populated on read)
 	AgentCount        int    `json:"agentCount,omitempty"`
 	ActiveBrokerCount int    `json:"activeBrokerCount,omitempty"`
@@ -1187,4 +1190,14 @@ type GitHubTokenPermissions struct {
 	Metadata     string `json:"metadata,omitempty"`
 	Checks       string `json:"checks,omitempty"`
 	Actions      string `json:"actions,omitempty"`
+}
+
+// GitIdentityConfig configures how agent commits are attributed.
+type GitIdentityConfig struct {
+	// Mode selects the attribution strategy: "bot" (default), "custom", or "co-authored".
+	Mode  string `json:"mode"`
+	// Name is the git author/committer name (used when mode is "custom").
+	Name  string `json:"name,omitempty"`
+	// Email is the git author/committer email (used when mode is "custom").
+	Email string `json:"email,omitempty"`
 }

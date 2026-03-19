@@ -23,7 +23,7 @@
 import { LitElement, html, css } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 
-import type { PageData, Grove, Template, AdminGroup } from '../../shared/types.js';
+import type { PageData, Grove, Template, AdminGroup, GitHubAppGroveStatus, GitHubTokenPermissions } from '../../shared/types.js';
 import { can, canAny } from '../../shared/types.js';
 import { apiFetch } from '../../client/api.js';
 import '../shared/env-var-list.js';
@@ -172,6 +172,22 @@ export class ScionPageGroveSettings extends LitElement {
 
   @state()
   private configDefaultResDisk = '';
+
+  // GitHub App integration
+  @state()
+  private githubAppStatus: GitHubAppGroveStatus | null = null;
+
+  @state()
+  private githubAppInstallationId: number | null = null;
+
+  @state()
+  private githubAppPermissions: GitHubTokenPermissions | null = null;
+
+  @state()
+  private githubAppLoading = false;
+
+  @state()
+  private githubAppError: string | null = null;
 
   private syncAgentId: string | null = null;
   private syncPollTimer: ReturnType<typeof setInterval> | null = null;
@@ -502,6 +518,85 @@ export class ScionPageGroveSettings extends LitElement {
       justify-content: flex-start;
       margin-top: 1rem;
     }
+
+    /* GitHub App section styles */
+    .github-no-install {
+      text-align: center;
+      padding: 1.5rem;
+    }
+
+    .github-no-install p {
+      margin: 0.5rem 0;
+    }
+
+    .github-status-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1.5rem;
+      margin-bottom: 1rem;
+    }
+
+    .github-status-item {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+    }
+
+    .github-status-value {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .github-status-dot {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+    }
+
+    .github-status-dot.ok { background: #16a34a; }
+    .github-status-dot.degraded { background: #eab308; }
+    .github-status-dot.error { background: #dc2626; }
+    .github-status-dot.unchecked { background: #94a3b8; }
+
+    .github-permissions {
+      margin-top: 1rem;
+    }
+
+    .github-perm-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.375rem;
+      margin-top: 0.375rem;
+    }
+
+    .github-perm-badge {
+      font-size: 0.75rem;
+      padding: 0.125rem 0.5rem;
+      border-radius: 9999px;
+      border: 1px solid var(--scion-border, #e2e8f0);
+      background: var(--scion-bg-subtle, #f1f5f9);
+      color: var(--scion-text-muted, #64748b);
+    }
+
+    .github-perm-badge.write {
+      background: #dbeafe;
+      border-color: #93c5fd;
+      color: #1e40af;
+    }
+
+    .github-perm-badge.read {
+      background: #f0fdf4;
+      border-color: #86efac;
+      color: #166534;
+    }
+
+    .status-message.warning {
+      background: #fef3c7;
+      color: #92400e;
+      border: 1px solid #fcd34d;
+    }
   `;
 
   override connectedCallback(): void {
@@ -537,6 +632,10 @@ export class ScionPageGroveSettings extends LitElement {
       }
 
       this.grove = (await response.json()) as Grove;
+      // Populate GitHub App fields from grove data
+      this.githubAppInstallationId = this.grove.githubInstallationId ?? null;
+      this.githubAppStatus = this.grove.githubAppStatus ?? null;
+      this.githubAppPermissions = this.grove.githubPermissions ?? null;
     } catch (err) {
       console.error('Failed to load grove:', err);
       this.error = err instanceof Error ? err.message : 'Failed to load grove';
@@ -855,6 +954,8 @@ export class ScionPageGroveSettings extends LitElement {
 
       ${this.renderConfigSection()}
 
+      ${this.renderGitHubAppSection()}
+
       ${this.membersGroup
         ? html`
             <scion-group-member-editor
@@ -933,6 +1034,153 @@ export class ScionPageGroveSettings extends LitElement {
         </sl-button>
       </div>
     `;
+  }
+
+  private renderGitHubAppSection() {
+    if (!this.grove?.gitRemote) return '';
+
+    const status = this.githubAppStatus;
+    const hasInstallation = this.githubAppInstallationId != null;
+
+    const stateIcon = (s: string | undefined) => {
+      switch (s) {
+        case 'ok': return html`<span class="github-status-dot ok"></span>`;
+        case 'degraded': return html`<span class="github-status-dot degraded"></span>`;
+        case 'error': return html`<span class="github-status-dot error"></span>`;
+        case 'unchecked': return html`<span class="github-status-dot unchecked"></span>`;
+        default: return '';
+      }
+    };
+
+    const stateLabel = (s: string | undefined) => {
+      switch (s) {
+        case 'ok': return 'Active';
+        case 'degraded': return 'Degraded';
+        case 'error': return 'Error';
+        case 'unchecked': return 'Unchecked';
+        default: return 'Not configured';
+      }
+    };
+
+    return html`
+      <div class="section">
+        <h2>GitHub App Integration</h2>
+        <p>Automatic token management for GitHub operations via GitHub App installation tokens.</p>
+
+        ${this.githubAppError ? html`
+          <div class="status-message error">${this.githubAppError}</div>
+        ` : ''}
+
+        ${!hasInstallation ? html`
+          <div class="github-no-install">
+            <sl-icon name="github" style="font-size: 2rem; color: var(--scion-text-muted, #64748b);"></sl-icon>
+            <p>No GitHub App installed for this grove's repository.</p>
+            <p class="field-help">Ask your Hub admin to configure the GitHub App, then install it on your organization or account.</p>
+            <sl-button variant="default" size="small" @click=${() => this.discoverGitHubInstallation()}>
+              <sl-icon slot="prefix" name="search"></sl-icon>
+              Discover Installation
+            </sl-button>
+          </div>
+        ` : html`
+          <div class="github-status-row">
+            <div class="github-status-item">
+              <span class="field-help">Status</span>
+              <div class="github-status-value">
+                ${stateIcon(status?.state)}
+                <strong>${stateLabel(status?.state)}</strong>
+              </div>
+            </div>
+            <div class="github-status-item">
+              <span class="field-help">Installation ID</span>
+              <code>${this.githubAppInstallationId}</code>
+            </div>
+            ${status?.last_token_mint ? html`
+              <div class="github-status-item">
+                <span class="field-help">Last Token Mint</span>
+                <span>${new Date(status.last_token_mint).toLocaleString()}</span>
+              </div>
+            ` : ''}
+          </div>
+
+          ${status?.state === 'error' || status?.state === 'degraded' ? html`
+            <div class="status-message ${status.state === 'error' ? 'error' : 'warning'}">
+              <strong>${status.error_code}:</strong> ${status.error_message}
+              ${status.state === 'error' && this.grove?.gitRemote ? html`
+                <br><small>Agents will use PAT fallback if available.</small>
+              ` : ''}
+            </div>
+          ` : ''}
+
+          <div class="github-permissions">
+            <span class="field-help">Token Permissions</span>
+            <div class="github-perm-grid">
+              ${this.renderPermBadge('Contents', this.githubAppPermissions?.contents)}
+              ${this.renderPermBadge('Pull Requests', this.githubAppPermissions?.pull_requests)}
+              ${this.renderPermBadge('Issues', this.githubAppPermissions?.issues)}
+              ${this.renderPermBadge('Metadata', this.githubAppPermissions?.metadata)}
+              ${this.renderPermBadge('Checks', this.githubAppPermissions?.checks)}
+              ${this.renderPermBadge('Actions', this.githubAppPermissions?.actions)}
+            </div>
+          </div>
+
+          <div style="margin-top: 1rem;">
+            <sl-button variant="text" size="small" @click=${() => this.removeGitHubInstallation()}>
+              <sl-icon slot="prefix" name="x-circle"></sl-icon>
+              Remove Installation
+            </sl-button>
+          </div>
+        `}
+      </div>
+    `;
+  }
+
+  private renderPermBadge(label: string, value: string | undefined) {
+    if (!value) return '';
+    return html`
+      <span class="github-perm-badge ${value}">
+        ${label}: ${value}
+      </span>
+    `;
+  }
+
+  private async discoverGitHubInstallation(): Promise<void> {
+    this.githubAppLoading = true;
+    this.githubAppError = null;
+    try {
+      const res = await apiFetch('/api/v1/github-app/installations/discover', { method: 'POST' });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { message?: string };
+        throw new Error(data.message || `Failed to discover installations (${res.status})`);
+      }
+      // Reload grove to pick up any auto-association
+      await this.loadGrove();
+    } catch (err) {
+      this.githubAppError = err instanceof Error ? err.message : 'Discovery failed';
+    } finally {
+      this.githubAppLoading = false;
+    }
+  }
+
+  private async removeGitHubInstallation(): Promise<void> {
+    if (!confirm('Remove GitHub App installation from this grove? Agents will fall back to PAT authentication.')) return;
+    this.githubAppLoading = true;
+    this.githubAppError = null;
+    try {
+      const res = await apiFetch(`/api/v1/groves/${this.groveId}/github-installation`, { method: 'DELETE' });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { message?: string };
+        throw new Error(data.message || `Failed to remove installation (${res.status})`);
+      }
+      this.githubAppInstallationId = null;
+      this.githubAppStatus = null;
+      this.githubAppPermissions = null;
+      // Reload grove
+      await this.loadGrove();
+    } catch (err) {
+      this.githubAppError = err instanceof Error ? err.message : 'Remove failed';
+    } finally {
+      this.githubAppLoading = false;
+    }
   }
 
   private renderConfigSection() {

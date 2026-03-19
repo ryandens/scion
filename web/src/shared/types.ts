@@ -124,6 +124,24 @@ export type GroveStatus = 'active' | 'inactive' | 'error';
  */
 export type GroveType = 'linked' | 'hub-native';
 
+export interface GitHubAppGroveStatus {
+  state: 'ok' | 'degraded' | 'error' | 'unchecked';
+  error_code?: string;
+  error_message?: string;
+  last_token_mint?: string;
+  last_error?: string;
+  last_checked: string;
+}
+
+export interface GitHubTokenPermissions {
+  contents?: string;
+  pull_requests?: string;
+  issues?: string;
+  metadata?: string;
+  checks?: string;
+  actions?: string;
+}
+
 export interface Grove {
   id: string;
   name: string;
@@ -141,6 +159,9 @@ export interface Grove {
   createdAt: string;
   updatedAt: string;
   _capabilities?: Capabilities;
+  githubInstallationId?: number;
+  githubPermissions?: GitHubTokenPermissions;
+  githubAppStatus?: GitHubAppGroveStatus;
 }
 
 /**

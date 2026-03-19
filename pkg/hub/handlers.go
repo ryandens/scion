@@ -3244,6 +3244,12 @@ func (s *Server) handleGroveRoutes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check for nested /git-identity path
+	if subPath == "git-identity" {
+		s.handleGroveGitIdentity(w, r, groveID)
+		return
+	}
+
 	// Otherwise handle as grove resource
 	s.handleGroveByIDInternal(w, r, groveID, subPath)
 }
