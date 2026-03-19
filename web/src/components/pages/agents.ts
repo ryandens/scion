@@ -221,6 +221,12 @@ export class ScionPageAgents extends LitElement {
     const agentMap = new Map(this.agents.map((a) => [a.id, a]));
     for (const agent of updatedAgents) {
       const existing = agentMap.get(agent.id);
+      // When "My Agents" filter is active, only update agents already in the
+      // filtered list — don't add new agents that weren't in the REST response.
+      // The server-side filter is the source of truth for ownership.
+      if (!existing && this.showMineOnly) {
+        continue;
+      }
       const merged = { ...existing, ...agent } as Agent;
       // Preserve _capabilities from existing state when the delta lacks them.
       // For brand-new agents from SSE, inherit scope-level capabilities.

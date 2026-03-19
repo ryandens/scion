@@ -168,6 +168,12 @@ export class ScionPageGroves extends LitElement {
     // Merge updated/created groves
     for (const grove of updatedGroves) {
       const existing = groveMap.get(grove.id);
+      // When "My Groves" filter is active, only update groves already in the
+      // filtered list — don't add new groves that weren't in the REST response.
+      // The server-side filter is the source of truth for ownership.
+      if (!existing && this.showMineOnly) {
+        continue;
+      }
       const merged = { ...existing, ...grove } as Grove;
       // Preserve _capabilities from existing state when the delta lacks them.
       if (!grove._capabilities && existing?._capabilities) {
