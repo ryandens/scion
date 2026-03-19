@@ -63,10 +63,10 @@ TMP_PUB_KEY=$(mktemp)
 echo "$PUB_KEY" > "$TMP_PUB_KEY"
 trap 'rm -f "$TMP_PUB_KEY"' EXIT
 
-# Add the deploy key (using --allow-write in case it needs to push back, though scion-agent usually doesn't need it on demo)
-# We use a timestamp in the title to avoid collisions if re-run, or we could use a fixed title.
-KEY_TITLE="scion-${HUB_NAME}-$(date +%Y%m%d-%H%M%S)"
-gh repo deploy-key add "$TMP_PUB_KEY" --repo "$REPO" --title "$KEY_TITLE" || echo "Key already exists or could not be added, continuing..."
+# Add the deploy key with a fixed title so re-runs are idempotent.
+# gh will error if the exact key content is already registered; that's expected and safe to ignore.
+KEY_TITLE="scion-${HUB_NAME}-deploy-key"
+gh repo deploy-key add "$TMP_PUB_KEY" --repo "$REPO" --title "$KEY_TITLE" || echo "Deploy key already exists or could not be added, continuing..."
 
 echo "=== Cloning Repo on GCE Instance using SSH ==="
 gcloud compute ssh "${INSTANCE_NAME}" \

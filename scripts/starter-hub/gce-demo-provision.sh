@@ -79,23 +79,32 @@ gcloud services enable \
     logging.googleapis.com \
     --project "${PROJECT_ID}"
 
-# Prompt for size
-if [[ -z "${SIZE_CHOICE:-}" ]]; then
-    echo "Choose instance size:"
-    echo "1) Small  (10s of agents)  - e2-standard-4 (4 vCPU, 16GB)"
-    echo "2) Medium (100s of agents) - n2-standard-32 (32 vCPU, 128GB)"
-    echo "3) Large  (~1000 agents)   - n2-standard-128 (128 vCPU, 512GB)"
-    read -p "Select [1-3]: " SIZE_CHOICE
+# Check if instance already exists
+INSTANCE_EXISTS=false
+if gcloud compute instances describe "${INSTANCE_NAME}" --zone "${ZONE}" --project "${PROJECT_ID}" &>/dev/null; then
+    echo "Instance ${INSTANCE_NAME} already exists, skipping creation."
+    INSTANCE_EXISTS=true
 fi
 
-case $SIZE_CHOICE in
-    1) MACHINE_TYPE="e2-standard-4" ;;
-    2) MACHINE_TYPE="n2-standard-32" ;;
-    3) MACHINE_TYPE="n2-standard-128" ;;
-    *) echo "Invalid choice: $SIZE_CHOICE"; exit 1 ;;
-esac
+# Prompt for size (only needed if creating the instance)
+if [[ "${INSTANCE_EXISTS}" == "false" ]]; then
+    if [[ -z "${SIZE_CHOICE:-}" ]]; then
+        echo "Choose instance size:"
+        echo "1) Small  (10s of agents)  - e2-standard-4 (4 vCPU, 16GB)"
+        echo "2) Medium (100s of agents) - n2-standard-32 (32 vCPU, 128GB)"
+        echo "3) Large  (~1000 agents)   - n2-standard-128 (128 vCPU, 512GB)"
+        read -p "Select [1-3]: " SIZE_CHOICE
+    fi
 
-echo "Selected Machine Type: ${MACHINE_TYPE}"
+    case $SIZE_CHOICE in
+        1) MACHINE_TYPE="e2-standard-4" ;;
+        2) MACHINE_TYPE="n2-standard-32" ;;
+        3) MACHINE_TYPE="n2-standard-128" ;;
+        *) echo "Invalid choice: $SIZE_CHOICE"; exit 1 ;;
+    esac
+
+    echo "Selected Machine Type: ${MACHINE_TYPE}"
+fi
 
 # Prompt for cluster (only when GKE is enabled)
 if [[ "${ENABLE_GKE}" == "true" ]]; then
@@ -177,20 +186,24 @@ else
 fi
 
 # Create Instance
-echo "Creating GCE instance ${INSTANCE_NAME}..."
-gcloud compute instances create "${INSTANCE_NAME}" \
-    --project="${PROJECT_ID}" \
-    --zone="${ZONE}" \
-    --machine-type="${MACHINE_TYPE}" \
-    --network-interface=network-tier=PREMIUM,subnet=default \
-    --maintenance-policy=MIGRATE \
-    --provisioning-model=STANDARD \
-    --service-account="${SERVICE_ACCOUNT_EMAIL}" \
-    --scopes=https://www.googleapis.com/auth/cloud-platform \
-    --tags=https-server,scion-hub \
-    --labels=env=${HUB_NAME},project=scion,type=scion-hub \
-    --create-disk=auto-delete=yes,boot=yes,device-name=${INSTANCE_NAME},image=projects/ubuntu-os-cloud/global/images/family/ubuntu-2204-lts,mode=rw,size=200,type=projects/${PROJECT_ID}/zones/${ZONE}/diskTypes/pd-balanced \
-    --metadata-from-file=user-data="${CLOUD_INIT_FILE}"
+if [[ "${INSTANCE_EXISTS}" == "false" ]]; then
+    echo "Creating GCE instance ${INSTANCE_NAME}..."
+    gcloud compute instances create "${INSTANCE_NAME}" \
+        --project="${PROJECT_ID}" \
+        --zone="${ZONE}" \
+        --machine-type="${MACHINE_TYPE}" \
+        --network-interface=network-tier=PREMIUM,subnet=default \
+        --maintenance-policy=MIGRATE \
+        --provisioning-model=STANDARD \
+        --service-account="${SERVICE_ACCOUNT_EMAIL}" \
+        --scopes=https://www.googleapis.com/auth/cloud-platform \
+        --tags=https-server,scion-hub \
+        --labels=env=${HUB_NAME},project=scion,type=scion-hub \
+        --create-disk=auto-delete=yes,boot=yes,device-name=${INSTANCE_NAME},image=projects/ubuntu-os-cloud/global/images/family/ubuntu-2204-lts,mode=rw,size=200,type=projects/${PROJECT_ID}/zones/${ZONE}/diskTypes/pd-balanced \
+        --metadata-from-file=user-data="${CLOUD_INIT_FILE}"
+else
+    echo "Skipping instance creation (already exists)."
+fi
 
 # Cluster creation
 if [[ "${CREATE_CLUSTER:-}" == "true" ]]; then
