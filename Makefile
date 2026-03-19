@@ -10,10 +10,11 @@ LDFLAGS            := $(shell ./hack/version.sh)
 SCIONTOOL_LDFLAGS  := $(shell ./hack/version.sh github.com/GoogleCloudPlatform/scion/cmd/sciontool/commands)
 CONTAINER_OS  := linux
 CONTAINER_ARCH := $(shell if [ "$$(uname -m)" = "x86_64" ]; then echo amd64; else echo arm64; fi)
+GOLANGCI_LINT := $(shell command -v golangci-lint 2>/dev/null || echo $(shell go env GOPATH)/bin/golangci-lint)
 
 .DEFAULT_GOAL := help
 
-.PHONY: all build install test test-fast vet lint web web-typecheck fmt ci clean help container-sciontool container-scion container-binaries
+.PHONY: all build install test test-fast vet lint golangci-lint web web-typecheck fmt ci clean help container-sciontool container-scion container-binaries
 
 ## all: Build the web frontend, then compile the Go binary with embedded assets
 all: web install
@@ -49,6 +50,16 @@ vet:
 ## lint: Run go vet (no SQLite, memory-safe)
 lint:
 	@go vet -tags no_sqlite ./...
+
+## golangci-lint: Run golangci-lint on new issues only (install via: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest)
+golangci-lint:
+	@if [ ! -x "$(GOLANGCI_LINT)" ]; then \
+		echo "ERROR: golangci-lint not found. Install with: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest"; \
+		exit 1; \
+	fi
+	@echo "Running golangci-lint (new issues vs main)..."
+	@$(GOLANGCI_LINT) run --build-tags no_sqlite --new-from-rev=main ./...
+	@echo "golangci-lint passed."
 
 ## web: Build the web frontend
 web:
@@ -93,7 +104,7 @@ fmt:
 	@echo "Go formatting done."
 
 ## ci: Run the full CI pipeline locally (mirrors GitHub Actions)
-ci: fmt web web-typecheck lint test-fast build
+ci: fmt web web-typecheck lint golangci-lint test-fast build
 	@echo ""
 	@echo "CI passed."
 
