@@ -18,16 +18,30 @@
  * Profile Access Tokens page
  *
  * Thin wrapper around the shared <scion-token-list> component,
- * providing the page header and description.
+ * providing the page header and description. When the hub has a
+ * GitHub App configured and the current user owns groves that have
+ * an active GitHub App installation, a link to manage the GitHub App
+ * installation is shown below the header.
  */
 
-import { LitElement, html, css } from 'lit';
-import { customElement } from 'lit/decorators.js';
+import { LitElement, html, css, nothing } from 'lit';
+import { customElement, state } from 'lit/decorators.js';
+import { apiFetch } from '../../client/api.js';
+
+import type { Grove } from '../../shared/types.js';
 
 import '../shared/token-list.js';
 
+interface GitHubAppInfo {
+  configured: boolean;
+  installation_url?: string;
+}
+
 @customElement('scion-page-profile-tokens')
 export class ScionPageProfileTokens extends LitElement {
+  @state()
+  private githubAppLink: string | null = null;
+
   static override styles = css`
     :host {
       display: block;
@@ -53,7 +67,60 @@ export class ScionPageProfileTokens extends LitElement {
       font-size: 0.875rem;
       margin: 0;
     }
+
+    .github-app-card {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.75rem 1rem;
+      margin-bottom: 1.5rem;
+      background: var(--scion-bg-subtle, #f8fafc);
+      border: 1px solid var(--scion-border, #e2e8f0);
+      border-radius: var(--scion-radius, 0.5rem);
+      font-size: 0.875rem;
+      color: var(--scion-text, #1e293b);
+    }
+
+    .github-app-card sl-icon {
+      font-size: 1.25rem;
+      flex-shrink: 0;
+      color: var(--scion-text-muted, #64748b);
+    }
+
+    .github-app-card span {
+      flex: 1;
+      color: var(--scion-text-muted, #64748b);
+    }
   `;
+
+  override connectedCallback(): void {
+    super.connectedCallback();
+    this.checkGitHubApp();
+  }
+
+  private async checkGitHubApp(): Promise<void> {
+    try {
+      const [appRes, grovesRes] = await Promise.all([
+        apiFetch('/api/v1/github-app'),
+        apiFetch('/api/v1/groves?mine=true'),
+      ]);
+
+      if (!appRes.ok || !grovesRes.ok) return;
+
+      const appData = (await appRes.json()) as GitHubAppInfo;
+      if (!appData.configured || !appData.installation_url) return;
+
+      const grovesData = (await grovesRes.json()) as { groves: Grove[] };
+      const hasInstallation = (grovesData.groves || []).some(
+        (g) => g.githubInstallationId
+      );
+      if (hasInstallation) {
+        this.githubAppLink = appData.installation_url;
+      }
+    } catch {
+      // Non-fatal — the link is a convenience feature
+    }
+  }
 
   override render() {
     return html`
@@ -66,6 +133,24 @@ export class ScionPageProfileTokens extends LitElement {
           </p>
         </div>
       </div>
+
+      ${this.githubAppLink
+        ? html`
+            <div class="github-app-card">
+              <sl-icon name="github"></sl-icon>
+              <span>Manage repository access and permissions for the GitHub App integration.</span>
+              <sl-button
+                size="small"
+                variant="default"
+                href=${this.githubAppLink}
+                target="_blank"
+              >
+                <sl-icon slot="prefix" name="box-arrow-up-right"></sl-icon>
+                Configure GitHub App
+              </sl-button>
+            </div>
+          `
+        : nothing}
 
       <scion-token-list></scion-token-list>
     `;
