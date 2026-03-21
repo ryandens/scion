@@ -1245,6 +1245,51 @@ func TestGroveSyncTemplates_RepoURL(t *testing.T) {
 	assert.Equal(t, 1, agent.AppliedConfig.GitClone.Depth)
 }
 
+// TestGroveSyncTemplates_RepoURL_BareHost verifies that bare host/org/repo
+// URLs (without a scheme) are accepted and normalized with https://.
+func TestGroveSyncTemplates_RepoURL_BareHost(t *testing.T) {
+	srv, s := testServer(t)
+	ctx := context.Background()
+
+	broker := &store.RuntimeBroker{
+		ID:     "broker-sync-bare",
+		Slug:   "sync-bare-broker",
+		Name:   "Sync Bare Broker",
+		Status: store.BrokerStatusOnline,
+	}
+	require.NoError(t, s.CreateRuntimeBroker(ctx, broker))
+
+	grove := &store.Grove{
+		ID:                     "grove-sync-bare",
+		Slug:                   "sync-bare-grove",
+		Name:                   "Sync Bare Grove",
+		DefaultRuntimeBrokerID: broker.ID,
+	}
+	require.NoError(t, s.CreateGrove(ctx, grove))
+	require.NoError(t, s.AddGroveProvider(ctx, &store.GroveProvider{
+		GroveID:  grove.ID,
+		BrokerID: broker.ID,
+		Status:   store.BrokerStatusOnline,
+		LinkedBy: "test",
+	}))
+
+	disp := &createAgentDispatcher{createPhase: string(state.PhaseRunning)}
+	srv.SetDispatcher(disp)
+
+	rec := doRequest(t, srv, http.MethodPost, "/api/v1/groves/"+grove.ID+"/sync-templates",
+		SyncTemplatesRequest{RepoURL: "github.com/ptone/scion-athenaeum"})
+	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
+
+	var resp SyncTemplatesResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+
+	agent, err := s.GetAgent(ctx, resp.AgentID)
+	require.NoError(t, err)
+
+	require.NotNil(t, agent.AppliedConfig.GitClone)
+	assert.Equal(t, "https://github.com/ptone/scion-athenaeum.git", agent.AppliedConfig.GitClone.URL)
+}
+
 // TestGroveSyncTemplates_RepoURL_InvalidURL verifies that an invalid repo URL is rejected.
 func TestGroveSyncTemplates_RepoURL_InvalidURL(t *testing.T) {
 	srv, s := testServer(t)
@@ -1292,6 +1337,8 @@ func TestCleanTemplateRepoURL(t *testing.T) {
 		{"https://github.com/org/repo/tree/main/.scion/templates", "https://github.com/org/repo"},
 		{"https://github.com/org/repo/tree/develop", "https://github.com/org/repo"},
 		{"git@github.com:org/repo.git", "git@github.com:org/repo.git"},
+		{"github.com/ptone/scion-athenaeum", "github.com/ptone/scion-athenaeum"},
+		{"github.com/org/repo/.scion/templates", "github.com/org/repo"},
 		{"https://gitlab.com/org/repo/-/tree/main/.scion/templates", "https://gitlab.com/org/repo"},
 	}
 	for _, tt := range tests {

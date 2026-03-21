@@ -7679,6 +7679,10 @@ func (s *Server) handleGroveSyncTemplates(w http.ResponseWriter, r *http.Request
 	// For non-git groves, allow loading templates from an external repo URL.
 	if req.RepoURL != "" && grove.GitRemote == "" {
 		cleanedURL := cleanTemplateRepoURL(req.RepoURL)
+		// Accept bare host/org/repo inputs by prepending https://.
+		if !strings.Contains(cleanedURL, "://") && !strings.HasPrefix(cleanedURL, "git@") {
+			cleanedURL = "https://" + cleanedURL
+		}
 		if !util.IsGitURL(cleanedURL) {
 			writeError(w, http.StatusBadRequest, "invalid_repo_url", "The provided URL is not a valid git repository URL", nil)
 			return
