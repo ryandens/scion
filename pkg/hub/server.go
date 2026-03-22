@@ -231,7 +231,7 @@ type RuntimeBrokerClient interface {
 	// MessageAgent sends a message to an agent on a remote runtime broker.
 	// brokerID is used for HMAC authentication lookup.
 	// structuredMsg is optional; when non-nil it takes precedence over the plain message string.
-	MessageAgent(ctx context.Context, brokerID, brokerEndpoint, agentID, message string, interrupt bool, structuredMsg *messages.StructuredMessage) error
+	MessageAgent(ctx context.Context, brokerID, brokerEndpoint, agentID, groveID, message string, interrupt bool, structuredMsg *messages.StructuredMessage) error
 
 	// CheckAgentPrompt checks if an agent has a non-empty prompt.md file.
 	// brokerID is used for HMAC authentication lookup.

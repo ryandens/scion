@@ -64,8 +64,8 @@ func (c *AuthenticatedBrokerClient) DeleteAgent(ctx context.Context, brokerID, b
 }
 
 // MessageAgent sends a message to an agent on a remote runtime broker with HMAC authentication.
-func (c *AuthenticatedBrokerClient) MessageAgent(ctx context.Context, brokerID, brokerEndpoint, agentID, message string, interrupt bool, structuredMsg *messages.StructuredMessage) error {
-	return c.transport.MessageAgent(ctx, brokerID, brokerEndpoint, agentID, message, interrupt, structuredMsg)
+func (c *AuthenticatedBrokerClient) MessageAgent(ctx context.Context, brokerID, brokerEndpoint, agentID, groveID, message string, interrupt bool, structuredMsg *messages.StructuredMessage) error {
+	return c.transport.MessageAgent(ctx, brokerID, brokerEndpoint, agentID, groveID, message, interrupt, structuredMsg)
 }
 
 // CheckAgentPrompt checks if an agent has a non-empty prompt.md file on a remote runtime broker.

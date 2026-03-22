@@ -307,6 +307,9 @@ type MessageRequest struct {
 
 	// Interrupt the harness before sending.
 	Interrupt bool `json:"interrupt,omitempty"`
+
+	// GroveID is the grove ID for the target agent (used for message log labels).
+	GroveID string `json:"grove_id,omitempty"`
 }
 
 // ExecRequest is the request body for executing a command in an agent.

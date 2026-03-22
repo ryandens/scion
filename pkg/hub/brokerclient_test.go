@@ -513,7 +513,7 @@ func TestAuthenticatedBrokerClient_AllOperations(t *testing.T) {
 		t.Errorf("DeleteAgent failed: %v", err)
 	}
 
-	err = client.MessageAgent(ctx, brokerID, server.URL, "test-agent", "hello", false, nil)
+	err = client.MessageAgent(ctx, brokerID, server.URL, "test-agent", "", "hello", false, nil)
 	if err != nil {
 		t.Errorf("MessageAgent failed: %v", err)
 	}

@@ -64,8 +64,8 @@ func (c *HTTPRuntimeBrokerClient) DeleteAgent(ctx context.Context, brokerID, bro
 	return c.transport.DeleteAgent(ctx, brokerID, brokerEndpoint, agentID, deleteFiles, removeBranch, softDelete, deletedAt)
 }
 
-func (c *HTTPRuntimeBrokerClient) MessageAgent(ctx context.Context, brokerID, brokerEndpoint, agentID, message string, interrupt bool, structuredMsg *messages.StructuredMessage) error {
-	return c.transport.MessageAgent(ctx, brokerID, brokerEndpoint, agentID, message, interrupt, structuredMsg)
+func (c *HTTPRuntimeBrokerClient) MessageAgent(ctx context.Context, brokerID, brokerEndpoint, agentID, groveID, message string, interrupt bool, structuredMsg *messages.StructuredMessage) error {
+	return c.transport.MessageAgent(ctx, brokerID, brokerEndpoint, agentID, groveID, message, interrupt, structuredMsg)
 }
 
 // HasPromptResponse is the response from the has-prompt action.
@@ -1066,7 +1066,7 @@ func (d *HTTPAgentDispatcher) DispatchAgentMessage(ctx context.Context, agent *s
 		return err
 	}
 
-	return d.client.MessageAgent(ctx, agent.RuntimeBrokerID, endpoint, agent.Slug, message, interrupt, structuredMsg)
+	return d.client.MessageAgent(ctx, agent.RuntimeBrokerID, endpoint, agent.Slug, agent.GroveID, message, interrupt, structuredMsg)
 }
 
 // DispatchAgentLogs retrieves agent.log content from the runtime broker.

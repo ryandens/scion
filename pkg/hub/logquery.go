@@ -177,6 +177,9 @@ func BuildLogFilter(opts LogQueryOptions, projectID ...string) string {
 	} else if opts.AgentID != "" {
 		parts = append(parts, fmt.Sprintf(`labels.agent_id = %q`, opts.AgentID))
 	}
+	if opts.GroveID != "" {
+		parts = append(parts, fmt.Sprintf(`labels.grove_id = %q`, opts.GroveID))
+	}
 	if opts.BrokerID != "" {
 		parts = append(parts, fmt.Sprintf(`labels.broker_id = %q`, opts.BrokerID))
 	}

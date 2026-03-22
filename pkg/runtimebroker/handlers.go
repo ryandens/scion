@@ -1131,6 +1131,9 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request, id string) 
 		logMsg = "message delivered (interrupt, unbuffered)"
 	}
 	logAttrs := []any{"agent_id", id}
+	if req.GroveID != "" {
+		logAttrs = append(logAttrs, "grove_id", req.GroveID)
+	}
 	if req.StructuredMessage != nil {
 		logAttrs = append(logAttrs, req.StructuredMessage.LogAttrs()...)
 	}

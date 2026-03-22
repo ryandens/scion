@@ -124,6 +124,7 @@ func (s *Server) handleBrokerInbound(w http.ResponseWriter, r *http.Request) {
 		logAttrs := []any{
 			"agent_id", agent.ID,
 			"agent_name", agent.Name,
+			"grove_id", agent.GroveID,
 			"source", "broker-inbound",
 			"broker_id", broker.ID(),
 			"plugin_name", pluginName,

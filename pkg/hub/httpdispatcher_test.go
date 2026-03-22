@@ -147,7 +147,7 @@ func (m *mockRuntimeBrokerClient) DeleteAgent(ctx context.Context, brokerID, bro
 	return m.returnErr
 }
 
-func (m *mockRuntimeBrokerClient) MessageAgent(ctx context.Context, brokerID, brokerEndpoint, agentID, message string, interrupt bool, structuredMsg *messages.StructuredMessage) error {
+func (m *mockRuntimeBrokerClient) MessageAgent(ctx context.Context, brokerID, brokerEndpoint, agentID, groveID, message string, interrupt bool, structuredMsg *messages.StructuredMessage) error {
 	m.messageCalled = true
 	m.lastBrokerID = brokerID
 	m.lastEndpoint = brokerEndpoint
@@ -516,7 +516,7 @@ func TestHTTPRuntimeBrokerClient_MessageAgent(t *testing.T) {
 
 	client := NewHTTPRuntimeBrokerClient()
 
-	err := client.MessageAgent(context.Background(), "host-1", server.URL, "test-agent", "Hello!", true, nil)
+	err := client.MessageAgent(context.Background(), "host-1", server.URL, "test-agent", "", "Hello!", true, nil)
 	if err != nil {
 		t.Fatalf("MessageAgent failed: %v", err)
 	}

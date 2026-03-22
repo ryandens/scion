@@ -163,13 +163,16 @@ func (c *ControlChannelBrokerClient) DeleteAgent(ctx context.Context, brokerID, 
 }
 
 // MessageAgent sends a message to an agent via control channel.
-func (c *ControlChannelBrokerClient) MessageAgent(ctx context.Context, brokerID, brokerEndpoint, agentID, message string, interrupt bool, structuredMsg *messages.StructuredMessage) error {
+func (c *ControlChannelBrokerClient) MessageAgent(ctx context.Context, brokerID, brokerEndpoint, agentID, groveID, message string, interrupt bool, structuredMsg *messages.StructuredMessage) error {
 	_ = brokerEndpoint
 	path := fmt.Sprintf("/api/v1/agents/%s/message", url.PathEscape(agentID))
 
 	// Build the request body with structured message if available
 	reqBody := map[string]interface{}{
 		"interrupt": interrupt,
+	}
+	if groveID != "" {
+		reqBody["grove_id"] = groveID
 	}
 	if structuredMsg != nil {
 		reqBody["structured_message"] = structuredMsg
@@ -436,11 +439,11 @@ func (c *HybridBrokerClient) DeleteAgent(ctx context.Context, brokerID, brokerEn
 }
 
 // MessageAgent sends a message to an agent, preferring control channel.
-func (c *HybridBrokerClient) MessageAgent(ctx context.Context, brokerID, brokerEndpoint, agentID, message string, interrupt bool, structuredMsg *messages.StructuredMessage) error {
+func (c *HybridBrokerClient) MessageAgent(ctx context.Context, brokerID, brokerEndpoint, agentID, groveID, message string, interrupt bool, structuredMsg *messages.StructuredMessage) error {
 	if c.useControlChannel(brokerID) {
-		return c.controlChannel.MessageAgent(ctx, brokerID, brokerEndpoint, agentID, message, interrupt, structuredMsg)
+		return c.controlChannel.MessageAgent(ctx, brokerID, brokerEndpoint, agentID, groveID, message, interrupt, structuredMsg)
 	}
-	return c.httpClient.MessageAgent(ctx, brokerID, brokerEndpoint, agentID, message, interrupt, structuredMsg)
+	return c.httpClient.MessageAgent(ctx, brokerID, brokerEndpoint, agentID, groveID, message, interrupt, structuredMsg)
 }
 
 // CheckAgentPrompt checks if an agent has a non-empty prompt.md file.

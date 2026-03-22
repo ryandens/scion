@@ -258,12 +258,15 @@ func (t *brokerHTTPTransport) DeleteAgent(ctx context.Context, brokerID, brokerE
 	return nil
 }
 
-func (t *brokerHTTPTransport) MessageAgent(ctx context.Context, brokerID, brokerEndpoint, agentID, message string, interrupt bool, structuredMsg *messages.StructuredMessage) error {
+func (t *brokerHTTPTransport) MessageAgent(ctx context.Context, brokerID, brokerEndpoint, agentID, groveID, message string, interrupt bool, structuredMsg *messages.StructuredMessage) error {
 	endpoint := fmt.Sprintf("%s/api/v1/agents/%s/message", strings.TrimSuffix(brokerEndpoint, "/"), url.PathEscape(agentID))
 
 	// Build the request body with structured message if available
 	reqBody := map[string]interface{}{
 		"interrupt": interrupt,
+	}
+	if groveID != "" {
+		reqBody["grove_id"] = groveID
 	}
 	if structuredMsg != nil {
 		reqBody["structured_message"] = structuredMsg

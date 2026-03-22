@@ -32,6 +32,7 @@ const (
 	AttrRecipient   = "recipient"
 	AttrRecipientID = "recipient_id"
 	AttrMsgType     = "msg_type"
+	AttrMsgGroveID  = "grove_id"
 )
 
 // MessageLoggerConfig configures the dedicated message logger.
@@ -199,7 +200,7 @@ func (h *messageCloudHandler) WithGroup(name string) slog.Handler {
 // promoteMessageAttrToLabels promotes message-specific attributes to GCP labels.
 func promoteMessageAttrToLabels(labels map[string]string, a slog.Attr) {
 	switch a.Key {
-	case AttrSender, AttrSenderID, AttrRecipient, AttrRecipientID, AttrMsgType:
+	case AttrSender, AttrSenderID, AttrRecipient, AttrRecipientID, AttrMsgType, AttrMsgGroveID:
 		if v := a.Value.String(); v != "" {
 			labels[a.Key] = v
 		}

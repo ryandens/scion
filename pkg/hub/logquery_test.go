@@ -87,6 +87,14 @@ func TestBuildLogFilter(t *testing.T) {
 			},
 			expected: `labels.agent_id = "agent-123" AND labels.broker_id = "broker-east-1" AND timestamp >= "2026-03-07T10:00:00Z" AND severity >= ERROR`,
 		},
+		{
+			name: "grove ID filter",
+			opts: LogQueryOptions{
+				AgentID: "agent-123",
+				GroveID: "grove-abc",
+			},
+			expected: `labels.agent_id = "agent-123" AND labels.grove_id = "grove-abc"`,
+		},
 	}
 
 	for _, tt := range tests {
@@ -140,6 +148,16 @@ func TestBuildLogFilter_LogID(t *testing.T) {
 			},
 			projectID: "my-project",
 			expected:  `logName = "projects/my-project/logs/scion-messages" AND (labels.recipient_id = "agent-123" OR labels.sender_id = "agent-123")`,
+		},
+		{
+			name: "message log with grove_id filter",
+			opts: LogQueryOptions{
+				AgentID: "agent-123",
+				GroveID: "grove-abc",
+				LogID:   "scion-messages",
+			},
+			projectID: "my-project",
+			expected:  `logName = "projects/my-project/logs/scion-messages" AND (labels.recipient_id = "agent-123" OR labels.sender_id = "agent-123") AND labels.grove_id = "grove-abc"`,
 		},
 	}
 
