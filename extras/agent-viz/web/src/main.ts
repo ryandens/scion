@@ -80,6 +80,14 @@ function init(): void {
 
 function handleManifest(m: PlaybackManifest): void {
   manifest = m;
+  console.log('[agent-viz] Manifest received:', {
+    agents: m.agents.length,
+    files: m.files.length,
+    timeRange: m.timeRange,
+    groveId: m.groveId,
+    groveName: m.groveName,
+  });
+  console.log('[agent-viz] Agents:', m.agents.map((a) => `${a.name} (${a.id.substring(0, 8)})`));
 
   // Update title
   const title = document.getElementById('grove-title');
@@ -93,6 +101,7 @@ function handleManifest(m: PlaybackManifest): void {
   // Initialize agent ring
   const w = overlayCanvas.width;
   const h = overlayCanvas.height;
+  console.log('[agent-viz] Canvas dimensions:', w, 'x', h);
   agentRing.init(m.agents, w / 2, h / 2);
 
   // Set up playback controls
@@ -107,6 +116,7 @@ function handleManifest(m: PlaybackManifest): void {
 }
 
 function handleEvent(evt: PlaybackEvent): void {
+  console.log('[agent-viz] Event:', evt.type, evt.data);
   switch (evt.type) {
     case 'agent_state':
       agentRing.updateState(evt.data as AgentStateEvent);

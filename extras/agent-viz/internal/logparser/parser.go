@@ -530,6 +530,12 @@ func extractEvents(entries []GCPLogEntry, agents []AgentInfo) []PlaybackEvent {
 			}
 
 		case "scion-messages":
+			// Skip "accepted" duplicates — only process dispatched messages
+			msgAction := getStr(jp, "message")
+			if strings.Contains(msgAction, "accepted") {
+				continue
+			}
+
 			sender := getStr(jp, "sender")
 			if sender == "" {
 				sender = e.Labels["sender"]
@@ -550,7 +556,6 @@ func extractEvents(entries []GCPLogEntry, agents []AgentInfo) []PlaybackEvent {
 				recipientName := strings.TrimPrefix(recipient, "agent:")
 
 				// Backfill agents referenced in messages
-				// Use sender_id/recipient_id if available, otherwise use the name as ID
 				senderID := getStr(jp, "sender_id")
 				if senderID == "" {
 					senderID = e.Labels["sender_id"]
@@ -571,6 +576,19 @@ func extractEvents(entries []GCPLogEntry, agents []AgentInfo) []PlaybackEvent {
 				}
 				if recipientID != "" && strings.HasPrefix(recipient, "agent:") {
 					ensureAgent(recipientID, ts)
+				}
+
+				// Resolve UUID-based names to friendly names
+				// e.g., "agent:a35ea791-..." should become "orchestrator"
+				if agentNameByID[senderName] != "" {
+					senderName = agentNameByID[senderName]
+				} else if senderID != "" && agentNameByID[senderID] != "" {
+					senderName = agentNameByID[senderID]
+				}
+				if agentNameByID[recipientName] != "" {
+					recipientName = agentNameByID[recipientName]
+				} else if recipientID != "" && agentNameByID[recipientID] != "" {
+					recipientName = agentNameByID[recipientID]
 				}
 
 				events = append(events, PlaybackEvent{

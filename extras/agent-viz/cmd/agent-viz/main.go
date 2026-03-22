@@ -37,6 +37,17 @@ func main() {
 		len(result.Manifest.Files),
 		len(result.Events))
 
+	for _, a := range result.Manifest.Agents {
+		log.Printf("  Agent: %s (id=%s, harness=%s)", a.Name, a.ID[:8], a.Harness)
+	}
+	if len(result.Manifest.Files) > 0 {
+		for _, f := range result.Manifest.Files {
+			log.Printf("  File: %s (dir=%v)", f.ID, f.IsDir)
+		}
+	} else {
+		log.Printf("  (no files detected from tool calls — files will appear dynamically during playback)")
+	}
+
 	engine, err := playback.NewEngine(result)
 	if err != nil {
 		log.Fatalf("Error creating playback engine: %v", err)
