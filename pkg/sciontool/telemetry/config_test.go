@@ -6,6 +6,7 @@ package telemetry
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -438,11 +439,79 @@ func TestLoadConfig_GCPDefaults(t *testing.T) {
 
 	cfg := LoadConfig()
 
-	if cfg.GCPCredentialsFile != "" {
-		t.Errorf("Expected GCPCredentialsFile to be empty by default, got %q", cfg.GCPCredentialsFile)
+	// Note: GCPCredentialsFile may be non-empty if the well-known path exists
+	// in the test environment's home directory. Only assert CloudProvider is
+	// empty when no credentials are present.
+	if cfg.GCPCredentialsFile == "" && cfg.CloudProvider != "" {
+		t.Errorf("Expected CloudProvider to be empty when no credentials, got %q", cfg.CloudProvider)
 	}
-	if cfg.CloudProvider != "" {
-		t.Errorf("Expected CloudProvider to be empty by default, got %q", cfg.CloudProvider)
+}
+
+func TestLoadConfig_WellKnownPathFallback(t *testing.T) {
+	clearTelemetryEnv()
+
+	// Create a temp home dir with the well-known credentials path
+	tmpHome := t.TempDir()
+	scionDir := filepath.Join(tmpHome, ".scion")
+	if err := os.MkdirAll(scionDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	credPath := filepath.Join(scionDir, "telemetry-gcp-credentials.json")
+	credJSON := `{"type":"service_account","project_id":"wellknown-project"}`
+	if err := os.WriteFile(credPath, []byte(credJSON), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Override HOME so LoadConfig finds the well-known path
+	origHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmpHome)
+	defer os.Setenv("HOME", origHome)
+
+	cfg := LoadConfig()
+
+	if cfg.GCPCredentialsFile != credPath {
+		t.Errorf("Expected GCPCredentialsFile = %q (well-known fallback), got %q", credPath, cfg.GCPCredentialsFile)
+	}
+	if cfg.CloudProvider != "gcp" {
+		t.Errorf("Expected CloudProvider auto-detected as 'gcp', got %q", cfg.CloudProvider)
+	}
+	if cfg.ProjectID != "wellknown-project" {
+		t.Errorf("Expected ProjectID = 'wellknown-project', got %q", cfg.ProjectID)
+	}
+}
+
+func TestLoadConfig_EnvTakesPriorityOverWellKnown(t *testing.T) {
+	clearTelemetryEnv()
+
+	// Create well-known path
+	tmpHome := t.TempDir()
+	scionDir := filepath.Join(tmpHome, ".scion")
+	os.MkdirAll(scionDir, 0755)
+	wellKnownPath := filepath.Join(scionDir, "telemetry-gcp-credentials.json")
+	os.WriteFile(wellKnownPath, []byte(`{"type":"service_account","project_id":"wk-project"}`), 0600)
+
+	// Also create a separate file for the env var
+	envFile, _ := os.CreateTemp("", "gcp-creds-*.json")
+	defer os.Remove(envFile.Name())
+	envFile.WriteString(`{"type":"service_account","project_id":"env-project"}`)
+	envFile.Close()
+
+	origHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmpHome)
+	os.Setenv(EnvGCPCredentials, envFile.Name())
+	defer func() {
+		os.Setenv("HOME", origHome)
+		clearTelemetryEnv()
+	}()
+
+	cfg := LoadConfig()
+
+	// Env var should take priority over well-known path
+	if cfg.GCPCredentialsFile != envFile.Name() {
+		t.Errorf("Expected env var path %q to take priority, got %q", envFile.Name(), cfg.GCPCredentialsFile)
+	}
+	if cfg.ProjectID != "env-project" {
+		t.Errorf("Expected ProjectID from env creds, got %q", cfg.ProjectID)
 	}
 }
 

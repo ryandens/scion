@@ -9,6 +9,7 @@ package telemetry
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -102,6 +103,12 @@ type FilterConfig struct {
 	Exclude []string
 }
 
+// WellKnownGCPCredentialsPath is the conventional path inside agent containers
+// for the GCP telemetry service account key file. The broker writes this file
+// via the secrets system and sets SCION_OTEL_GCP_CREDENTIALS to point to it.
+// As a fallback, LoadConfig probes this path when the env var is absent.
+const WellKnownGCPCredentialsPath = ".scion/telemetry-gcp-credentials.json"
+
 // LoadConfig loads telemetry configuration from environment variables.
 func LoadConfig() *Config {
 	cfg := &Config{
@@ -124,6 +131,21 @@ func LoadConfig() *Config {
 		GCPCredentialsFile: os.Getenv(EnvGCPCredentials),
 		CloudProvider:      os.Getenv(EnvCloudProvider),
 		MetricsDebug:       parseBoolEnv(EnvMetricsDebug, false),
+	}
+
+	// Fallback: if SCION_OTEL_GCP_CREDENTIALS is not set, probe the
+	// well-known path where the broker mounts the telemetry SA key file.
+	// This handles cases where the file is present (e.g. mounted via a
+	// volume or template) but the env var was not injected — for example,
+	// when the secret is not in ResolvedSecrets but the file exists from
+	// a prior provisioning step or manual placement.
+	if cfg.GCPCredentialsFile == "" {
+		if home, err := os.UserHomeDir(); err == nil {
+			wellKnown := filepath.Join(home, WellKnownGCPCredentialsPath)
+			if _, err := os.Stat(wellKnown); err == nil {
+				cfg.GCPCredentialsFile = wellKnown
+			}
+		}
 	}
 
 	// Auto-detect GCP provider when credentials file is present but provider

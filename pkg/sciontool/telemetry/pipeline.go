@@ -7,6 +7,7 @@ package telemetry
 import (
 	"context"
 	"fmt"
+	"os"
 	"sync"
 
 	"github.com/GoogleCloudPlatform/scion/pkg/sciontool/log"
@@ -60,6 +61,18 @@ func (p *Pipeline) Start(ctx context.Context) error {
 
 	if p.running {
 		return fmt.Errorf("pipeline already running")
+	}
+
+	// Log credential resolution for diagnostics
+	if p.config.GCPCredentialsFile != "" {
+		source := "env"
+		if envVal := os.Getenv(EnvGCPCredentials); envVal == "" {
+			source = "well-known-path"
+		}
+		log.Info("GCP telemetry credentials: %s (source: %s, project: %s)",
+			p.config.GCPCredentialsFile, source, p.config.ProjectID)
+	} else if p.config.IsCloudConfigured() {
+		log.Info("GCP telemetry credentials: none (using ADC fallback)")
 	}
 
 	// Create cloud exporter if configured
