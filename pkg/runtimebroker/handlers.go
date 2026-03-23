@@ -601,6 +601,11 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		s.agentLifecycleLog.Info("Agent provisioned",
+			"agent_id", req.ID, "grove_id", req.GroveID,
+			"name", req.Name, "slug", req.Slug,
+			"phase", string(state.PhaseCreated))
+
 		// Build a response with "created" status (no container launched)
 		agentResp := &AgentResponse{
 			ID:     req.ID,
@@ -634,6 +639,12 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 	agentInfo, err := sc.Manager.Start(ctx, opts)
 	if err != nil {
 		markAttemptFailed(http.StatusInternalServerError, "failed to create agent")
+
+		s.agentLifecycleLog.Error("Agent create failed",
+			"agent_id", req.ID, "grove_id", req.GroveID,
+			"name", req.Name, "slug", req.Slug,
+			"error", err)
+
 		// Clean up provisioned agent files so they don't become orphans.
 		if opts.GrovePath != "" {
 			if _, cleanupErr := agent.DeleteAgentFiles(opts.Name, opts.GrovePath, true); cleanupErr != nil {
@@ -647,6 +658,12 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 		RuntimeError(w, "Failed to create agent: "+err.Error())
 		return
 	}
+
+	s.agentLifecycleLog.Info("Agent created",
+		"agent_id", req.ID, "grove_id", req.GroveID,
+		"name", req.Name, "slug", req.Slug,
+		"phase", string(state.PhaseRunning),
+		"container_status", agentInfo.ContainerStatus)
 
 	// Log auth resolution info visible in broker logs
 	for _, w := range agentInfo.Warnings {
@@ -771,13 +788,17 @@ func (s *Server) deleteAgent(w http.ResponseWriter, r *http.Request, id string) 
 	// Resolve the correct manager for this agent (may be on an auxiliary runtime)
 	mgr := s.resolveManagerForAgent(ctx, id)
 
-	// Get the agent's grove path before stopping (needed for file deletion)
-	var grovePath string
+	// Get the agent's grove path and grove ID before stopping (needed for file deletion and logging)
+	var grovePath, agentGroveID string
 	agents, err := mgr.List(ctx, map[string]string{"scion.agent": "true"})
 	if err == nil {
 		for _, a := range agents {
 			if a.Name == id || a.ContainerID == id || a.Slug == id {
 				grovePath = a.GrovePath
+				agentGroveID = a.GroveID
+				if agentGroveID == "" {
+					agentGroveID = a.Grove
+				}
 				break
 			}
 		}
@@ -819,6 +840,16 @@ func (s *Server) deleteAgent(w http.ResponseWriter, r *http.Request, id string) 
 		}
 		RuntimeError(w, "Failed to delete agent: "+err.Error())
 		return
+	}
+
+	if softDelete {
+		s.agentLifecycleLog.Info("Agent soft-deleted",
+			"agent_id", id, "grove_id", agentGroveID,
+			"delete_files", deleteFiles, "remove_branch", removeBranch)
+	} else {
+		s.agentLifecycleLog.Info("Agent deleted",
+			"agent_id", id, "grove_id", agentGroveID,
+			"delete_files", deleteFiles, "remove_branch", removeBranch)
 	}
 
 	w.WriteHeader(http.StatusNoContent)
@@ -933,9 +964,17 @@ func (s *Server) startAgent(w http.ResponseWriter, r *http.Request, id string) {
 	mgr := s.resolveManagerForOpts(opts)
 	agentInfo, err := mgr.Start(ctx, opts)
 	if err != nil {
+		s.agentLifecycleLog.Error("Agent start failed",
+			"agent_id", id, "error", err)
 		RuntimeError(w, "Failed to start agent: "+err.Error())
 		return
 	}
+
+	s.agentLifecycleLog.Info("Agent started",
+		"agent_id", id, "grove_id", agentInfo.GroveID,
+		"name", agentInfo.Name, "slug", agentInfo.Slug,
+		"phase", string(state.PhaseRunning),
+		"container_status", agentInfo.ContainerStatus)
 
 	// Send an immediate heartbeat so the hub gets the updated container status
 	s.forceHeartbeatAll("start", id)
@@ -1011,11 +1050,17 @@ func (s *Server) stopAgent(w http.ResponseWriter, r *http.Request, id string) {
 		if isContainerStopTolerable(err) {
 			// Container doesn't exist, is already stopped, or podman/docker can't find it.
 			// Treat as success so the hub can update its state.
-			s.agentLifecycleLog.Warn("Stop target not found or already stopped, treating as success", "agent_id", id, "error", err)
+			s.agentLifecycleLog.Info("Agent stopped (already stopped/not found)",
+				"agent_id", id,
+				"phase", string(state.PhaseStopped))
 		} else {
 			RuntimeError(w, "Failed to stop agent: "+err.Error())
 			return
 		}
+	} else {
+		s.agentLifecycleLog.Info("Agent stopped",
+			"agent_id", id,
+			"phase", string(state.PhaseStopped))
 	}
 
 	s.forceHeartbeatAll("stop", id)
@@ -1074,6 +1119,8 @@ func (s *Server) restartAgent(w http.ResponseWriter, r *http.Request, id string)
 	mgr := s.resolveManagerForOpts(opts)
 	agentInfo, err := mgr.Start(ctx, opts)
 	if err != nil {
+		s.agentLifecycleLog.Error("Agent restart failed",
+			"agent_id", id, "error", err)
 		if strings.Contains(err.Error(), "not found") {
 			NotFound(w, "Agent")
 			return
@@ -1081,6 +1128,12 @@ func (s *Server) restartAgent(w http.ResponseWriter, r *http.Request, id string)
 		RuntimeError(w, "Failed to restart agent: "+err.Error())
 		return
 	}
+
+	s.agentLifecycleLog.Info("Agent restarted",
+		"agent_id", id, "grove_id", agentInfo.GroveID,
+		"name", agentInfo.Name, "slug", agentInfo.Slug,
+		"phase", string(state.PhaseRunning),
+		"container_status", agentInfo.ContainerStatus)
 
 	s.forceHeartbeatAll("restart", id)
 
@@ -1741,6 +1794,12 @@ func (s *Server) finalizeEnv(w http.ResponseWriter, r *http.Request, id string) 
 	s.pendingEnvGatherMu.Lock()
 	s.deletePendingState(id)
 	s.pendingEnvGatherMu.Unlock()
+
+	s.agentLifecycleLog.Info("Agent created (finalize-env)",
+		"agent_id", origReq.ID, "grove_id", origReq.GroveID,
+		"name", origReq.Name, "slug", origReq.Slug,
+		"phase", string(state.PhaseRunning),
+		"container_status", agentInfo.ContainerStatus)
 
 	resp := CreateAgentResponse{
 		Agent:   agentInfoPtr(AgentInfoToResponse(*agentInfo)),
