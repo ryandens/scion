@@ -103,6 +103,7 @@ func Sync(ctx context.Context, opts Options) (*Result, error) {
 	ctx, ci := fs.AddConfig(ctx)
 	ci.DryRun = opts.DryRun
 	ci.LogLevel = fs.LogLevelNotice
+	ci.CheckSum = true // WebDAV doesn't support modtime; use checksums instead
 
 	// Set up file exclusion filters
 	ctx, fi := filter.AddConfig(ctx)
