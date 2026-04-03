@@ -49,27 +49,27 @@ type GCPServiceAccountService interface {
 type GCPServiceAccount struct {
 	ID                 string    `json:"id"`
 	Scope              string    `json:"scope"`
-	ScopeID            string    `json:"scope_id"`
+	ScopeID            string    `json:"scopeId"`
 	Email              string    `json:"email"`
-	ProjectID          string    `json:"project_id"`
-	DisplayName        string    `json:"display_name"`
-	DefaultScopes      []string  `json:"default_scopes,omitempty"`
+	ProjectID          string    `json:"projectId"`
+	DisplayName        string    `json:"displayName"`
+	DefaultScopes      []string  `json:"defaultScopes,omitempty"`
 	Verified           bool      `json:"verified"`
-	VerifiedAt         time.Time `json:"verified_at,omitempty"`
+	VerifiedAt         time.Time `json:"verifiedAt,omitempty"`
 	VerificationStatus string    `json:"verificationStatus,omitempty"`
 	VerificationError  string    `json:"verificationError,omitempty"`
-	CreatedBy          string    `json:"created_by"`
-	CreatedAt          time.Time `json:"created_at"`
+	CreatedBy          string    `json:"createdBy"`
+	CreatedAt          time.Time `json:"createdAt"`
 	Managed            bool      `json:"managed"`
-	ManagedBy          string    `json:"managed_by,omitempty"`
+	ManagedBy          string    `json:"managedBy,omitempty"`
 }
 
 // CreateGCPServiceAccountRequest is the request for registering a GCP SA.
 type CreateGCPServiceAccountRequest struct {
 	Email       string   `json:"email"`
-	ProjectID   string   `json:"project_id"`
-	DisplayName string   `json:"display_name,omitempty"`
-	Scopes      []string `json:"default_scopes,omitempty"`
+	ProjectID   string   `json:"projectId"`
+	DisplayName string   `json:"displayName,omitempty"`
+	Scopes      []string `json:"defaultScopes,omitempty"`
 }
 
 // MintGCPServiceAccountRequest is the request for minting a new GCP SA.

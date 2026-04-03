@@ -79,9 +79,9 @@ func (s *Server) handleGroveGCPServiceAccountByID(w http.ResponseWriter, r *http
 
 type createGCPServiceAccountRequest struct {
 	Email       string   `json:"email"`
-	ProjectID   string   `json:"project_id"`
-	DisplayName string   `json:"display_name"`
-	Scopes      []string `json:"default_scopes,omitempty"`
+	ProjectID   string   `json:"projectId"`
+	DisplayName string   `json:"displayName"`
+	Scopes      []string `json:"defaultScopes,omitempty"`
 }
 
 func (s *Server) createGCPServiceAccount(w http.ResponseWriter, r *http.Request, groveID string) {
@@ -113,7 +113,7 @@ func (s *Server) createGCPServiceAccount(w http.ResponseWriter, r *http.Request,
 			missing = append(missing, "email")
 		}
 		if req.ProjectID == "" {
-			missing = append(missing, "project_id")
+			missing = append(missing, "projectId")
 		}
 		writeError(w, http.StatusBadRequest, ErrCodeInvalidRequest,
 			fmt.Sprintf("missing required field(s): %s", strings.Join(missing, ", ")), nil)

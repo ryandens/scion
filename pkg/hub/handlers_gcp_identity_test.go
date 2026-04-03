@@ -44,8 +44,8 @@ func TestCreateGCPServiceAccount_Success(t *testing.T) {
 	groveID := createTestGroveForSA(t, srv, s)
 
 	body := map[string]string{
-		"email":      "agent@my-project.iam.gserviceaccount.com",
-		"project_id": "my-project",
+		"email":     "agent@my-project.iam.gserviceaccount.com",
+		"projectId": "my-project",
 	}
 
 	rec := doRequest(t, srv, http.MethodPost,
@@ -64,7 +64,7 @@ func TestCreateGCPServiceAccount_MissingEmail(t *testing.T) {
 	groveID := createTestGroveForSA(t, srv, s)
 
 	body := map[string]string{
-		"project_id": "my-project",
+		"projectId": "my-project",
 	}
 
 	rec := doRequest(t, srv, http.MethodPost,
@@ -92,7 +92,7 @@ func TestCreateGCPServiceAccount_MissingProjectID(t *testing.T) {
 	var errResp ErrorResponse
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&errResp))
 	assert.Equal(t, ErrCodeInvalidRequest, errResp.Error.Code)
-	assert.Contains(t, errResp.Error.Message, "project_id")
+	assert.Contains(t, errResp.Error.Message, "projectId")
 }
 
 func TestCreateGCPServiceAccount_MissingBothFields(t *testing.T) {
@@ -107,7 +107,7 @@ func TestCreateGCPServiceAccount_MissingBothFields(t *testing.T) {
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&errResp))
 	assert.Equal(t, ErrCodeInvalidRequest, errResp.Error.Code)
 	assert.Contains(t, errResp.Error.Message, "email")
-	assert.Contains(t, errResp.Error.Message, "project_id")
+	assert.Contains(t, errResp.Error.Message, "projectId")
 }
 
 func TestCreateGCPServiceAccount_InvalidJSON(t *testing.T) {
@@ -129,8 +129,8 @@ func TestCreateGCPServiceAccount_GroveNotFound(t *testing.T) {
 	srv, _ := testServer(t)
 
 	body := map[string]string{
-		"email":      "agent@my-project.iam.gserviceaccount.com",
-		"project_id": "my-project",
+		"email":     "agent@my-project.iam.gserviceaccount.com",
+		"projectId": "my-project",
 	}
 
 	rec := doRequest(t, srv, http.MethodPost,
@@ -143,8 +143,8 @@ func TestCreateGCPServiceAccount_Duplicate(t *testing.T) {
 	groveID := createTestGroveForSA(t, srv, s)
 
 	body := map[string]string{
-		"email":      "agent@my-project.iam.gserviceaccount.com",
-		"project_id": "my-project",
+		"email":     "agent@my-project.iam.gserviceaccount.com",
+		"projectId": "my-project",
 	}
 
 	// First create should succeed
@@ -413,7 +413,7 @@ func TestMintGCPServiceAccount_ManagedFlagSet(t *testing.T) {
 
 	var sa struct {
 		Managed   bool   `json:"managed"`
-		ManagedBy string `json:"managed_by"`
+		ManagedBy string `json:"managedBy"`
 	}
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&sa))
 	assert.True(t, sa.Managed)
