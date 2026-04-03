@@ -82,6 +82,7 @@ const USED_ICONS = [
   'folder-fill',
   'folder-plus',
   'folder2-open',
+  'funnel',
   'gear',
   'github',
   'grid-3x3-gap',

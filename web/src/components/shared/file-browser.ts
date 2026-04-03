@@ -354,6 +354,7 @@ export class ScionFileBrowser extends LitElement {
   @state() private uploadProgress = false;
   @state() private sortField: 'name' | 'size' | 'modified' = 'name';
   @state() private sortDir: 'asc' | 'desc' = 'asc';
+  @state() private filterText = '';
 
   static override styles = css`
     :host {
@@ -367,9 +368,20 @@ export class ScionFileBrowser extends LitElement {
       margin-bottom: 0.75rem;
     }
 
+    .toolbar-left {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
     .toolbar-meta {
       font-size: 0.75rem;
       color: var(--scion-text-muted, #64748b);
+      white-space: nowrap;
+    }
+
+    .filter-input {
+      width: 14rem;
     }
 
     .toolbar-actions {
@@ -449,6 +461,13 @@ export class ScionFileBrowser extends LitElement {
 
     .file-table tr:last-child td {
       border-bottom: none;
+    }
+
+    .empty-filter {
+      padding: 1.5rem 1rem;
+      font-size: 0.875rem;
+      color: var(--scion-text-muted, #64748b);
+      text-align: center;
     }
 
     .file-list-truncated {
@@ -586,8 +605,9 @@ export class ScionFileBrowser extends LitElement {
     return this.sortField === field ? (this.sortDir === 'asc' ? '▲' : '▼') : '▲';
   }
 
-  private getSortedFiles(): FileEntry[] {
-    return [...this.files].sort((a, b) => {
+  private getFilteredAndSortedFiles(): FileEntry[] {
+    const filtered = this.filterText ? this.applyFilter(this.files) : this.files;
+    return [...filtered].sort((a, b) => {
       let cmp = 0;
       switch (this.sortField) {
         case 'name':
@@ -604,6 +624,31 @@ export class ScionFileBrowser extends LitElement {
         }
       }
       return this.sortDir === 'asc' ? cmp : -cmp;
+    });
+  }
+
+  private applyFilter(files: FileEntry[]): FileEntry[] {
+    const pattern = this.filterText;
+
+    // Try to use the input as a regex first (allows e.g. \.tsx?$ or ^src/)
+    try {
+      const re = new RegExp(pattern, 'i');
+      return files.filter((f) => re.test(f.path));
+    } catch {
+      // Not valid regex — fall back to fuzzy match
+    }
+
+    // Fuzzy match: every character in the pattern must appear in order (case-insensitive)
+    const lower = pattern.toLowerCase();
+    return files.filter((f) => {
+      const name = f.path.toLowerCase();
+      let ni = 0;
+      for (let pi = 0; pi < lower.length; pi++) {
+        ni = name.indexOf(lower[pi], ni);
+        if (ni === -1) return false;
+        ni++;
+      }
+      return true;
     });
   }
 
@@ -711,14 +756,39 @@ export class ScionFileBrowser extends LitElement {
   }
 
   private renderToolbar() {
+    const filtered = this.filterText ? this.applyFilter(this.files) : this.files;
+    const countLabel = this.filterText
+      ? `${filtered.length} / ${this.files.length} file${this.files.length !== 1 ? 's' : ''}`
+      : `${this.files.length} file${this.files.length !== 1 ? 's' : ''}`;
+
     return html`
       <div class="toolbar">
-        <span class="toolbar-meta">
-          ${this.files.length}
-          file${this.files.length !== 1 ? 's' : ''}${this.totalSize > 0
-            ? ` (${formatFileSize(this.totalSize)})`
-            : ''}
-        </span>
+        <div class="toolbar-left">
+          <span class="toolbar-meta">
+            ${countLabel}${this.totalSize > 0
+              ? ` (${formatFileSize(this.totalSize)})`
+              : ''}
+          </span>
+          ${this.files.length > 0
+            ? html`
+                <sl-input
+                  class="filter-input"
+                  size="small"
+                  placeholder="Filter files…"
+                  clearable
+                  .value=${this.filterText}
+                  @sl-input=${(e: Event) => {
+                    this.filterText = (e.target as HTMLInputElement).value;
+                  }}
+                  @sl-clear=${() => {
+                    this.filterText = '';
+                  }}
+                >
+                  <sl-icon name="funnel" slot="prefix"></sl-icon>
+                </sl-input>
+              `
+            : nothing}
+        </div>
         <div class="toolbar-actions">
           ${this.providerCount > 1
             ? html`
@@ -816,8 +886,12 @@ export class ScionFileBrowser extends LitElement {
   }
 
   private renderTable() {
+    const displayFiles = this.getFilteredAndSortedFiles();
     return html`
       <div class="file-table-wrapper">
+        ${this.filterText && displayFiles.length === 0
+          ? html`<div class="empty-filter">No files match the current filter.</div>`
+          : html`
         <table class="file-table">
           <thead>
             <tr>
@@ -846,7 +920,7 @@ export class ScionFileBrowser extends LitElement {
             </tr>
           </thead>
           <tbody>
-            ${this.getSortedFiles().slice(0, 1000).map(
+            ${displayFiles.slice(0, 1000).map(
               (file) => html`
                 <tr>
                   <td>
@@ -905,11 +979,12 @@ export class ScionFileBrowser extends LitElement {
             )}
           </tbody>
         </table>
-        ${this.files.length > 1000
+        ${displayFiles.length > 1000
           ? html`<div class="file-list-truncated">
-              File list truncated — showing 1,000 of ${this.files.length.toLocaleString()} files
+              File list truncated — showing 1,000 of ${displayFiles.length.toLocaleString()} files
             </div>`
           : nothing}
+        `}
       </div>
     `;
   }
