@@ -1634,6 +1634,67 @@ profiles:
 	}
 }
 
+// TestEnvGather_AutoDetectVertexAI_FromGACEnvVar tests that when no auth type
+// is explicitly selected, providing GOOGLE_APPLICATION_CREDENTIALS auto-detects
+// vertex-ai auth and requires project/region instead of an API key.
+func TestEnvGather_AutoDetectVertexAI_FromGACEnvVar(t *testing.T) {
+	// No auth_selected_type set — auto-detect should kick in
+	srv, _, groveDir := newTestServerWithHarnessConfig(t, "claude",
+		"harness: claude\nimage: test-image\nuser: scion\n",
+		`
+schema_version: "1"
+harness_configs:
+  claude:
+    harness: claude
+profiles:
+  default:
+    runtime: mock
+`)
+
+	// Provide GOOGLE_APPLICATION_CREDENTIALS but no API key, project, or region
+	body := `{
+		"name": "test-agent-autodetect-gac",
+		"id": "agent-uuid-adgac",
+		"gatherEnv": true,
+		"grovePath": "` + groveDir + `",
+		"resolvedEnv": {
+			"GOOGLE_APPLICATION_CREDENTIALS": "/path/to/service-account.json"
+		},
+		"config": {"template": "claude", "profile": "default"}
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 (auto-detect vertex-ai needs project/region), got %d: %s", w.Code, w.Body.String())
+	}
+
+	var envReqs EnvRequirementsResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &envReqs); err != nil {
+		t.Fatal("failed to decode response:", err)
+	}
+
+	// Should require GOOGLE_CLOUD_PROJECT (vertex-ai env keys), NOT ANTHROPIC_API_KEY
+	needsMap := make(map[string]struct{})
+	for _, k := range envReqs.Needs {
+		needsMap[k] = struct{}{}
+	}
+	if _, ok := needsMap["ANTHROPIC_API_KEY"]; ok {
+		t.Errorf("ANTHROPIC_API_KEY should not be required when GOOGLE_APPLICATION_CREDENTIALS triggers vertex-ai auto-detect, got needs=%v", envReqs.Needs)
+	}
+	if _, ok := needsMap["GOOGLE_CLOUD_PROJECT"]; !ok {
+		t.Errorf("expected GOOGLE_CLOUD_PROJECT in needs for auto-detected vertex-ai, got needs=%v", envReqs.Needs)
+	}
+
+	// gcloud-adc should NOT be required (GAC env var is the alternative)
+	if _, ok := needsMap["gcloud-adc"]; ok {
+		t.Errorf("gcloud-adc should not be required when GOOGLE_APPLICATION_CREDENTIALS is provided, got needs=%v", envReqs.Needs)
+	}
+}
+
 // TestEnvGather_VertexAI_ADCSatisfiedByEnvVar tests that vertex-ai auth is
 // satisfied when GOOGLE_APPLICATION_CREDENTIALS env var is provided instead
 // of a gcloud-adc file secret.

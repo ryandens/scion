@@ -263,6 +263,20 @@ func DetectAuthTypeFromFileSecrets(harnessName string, fileSecretNames map[strin
 	return ""
 }
 
+// DetectAuthTypeFromEnvVars checks whether resolved env vars can satisfy
+// an alternative auth method for the given harness. For example,
+// GOOGLE_APPLICATION_CREDENTIALS signals that ADC credentials are available,
+// so vertex-ai auth can be used without a gcloud-adc file secret.
+func DetectAuthTypeFromEnvVars(harnessName string, envKeys map[string]struct{}) string {
+	switch harnessName {
+	case "claude", "gemini":
+		if _, ok := envKeys["GOOGLE_APPLICATION_CREDENTIALS"]; ok {
+			return "vertex-ai"
+		}
+	}
+	return ""
+}
+
 // DetectAuthTypeFromGCPIdentity returns "vertex-ai" when a GCP service
 // account is assigned to the agent. Harnesses that support vertex-ai auth
 // can use the metadata server for credentials instead of an ADC file.

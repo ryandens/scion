@@ -516,6 +516,33 @@ func TestDetectAuthTypeFromGCPIdentity(t *testing.T) {
 	}
 }
 
+func TestDetectAuthTypeFromEnvVars(t *testing.T) {
+	tests := []struct {
+		name     string
+		harness  string
+		envKeys  map[string]struct{}
+		wantType string
+	}{
+		{"claude with GAC", "claude", map[string]struct{}{"GOOGLE_APPLICATION_CREDENTIALS": {}}, "vertex-ai"},
+		{"gemini with GAC", "gemini", map[string]struct{}{"GOOGLE_APPLICATION_CREDENTIALS": {}}, "vertex-ai"},
+		{"claude without GAC", "claude", map[string]struct{}{}, ""},
+		{"gemini without GAC", "gemini", map[string]struct{}{}, ""},
+		{"opencode with GAC", "opencode", map[string]struct{}{"GOOGLE_APPLICATION_CREDENTIALS": {}}, ""},
+		{"codex with GAC", "codex", map[string]struct{}{"GOOGLE_APPLICATION_CREDENTIALS": {}}, ""},
+		{"generic with GAC", "generic", map[string]struct{}{"GOOGLE_APPLICATION_CREDENTIALS": {}}, ""},
+		{"claude with unrelated env", "claude", map[string]struct{}{"SOME_OTHER_VAR": {}}, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := DetectAuthTypeFromEnvVars(tt.harness, tt.envKeys)
+			if got != tt.wantType {
+				t.Errorf("DetectAuthTypeFromEnvVars(%q, ...) = %q, want %q", tt.harness, got, tt.wantType)
+			}
+		})
+	}
+}
+
 func TestDetectAuthTypeFromFileSecrets(t *testing.T) {
 	tests := []struct {
 		name     string

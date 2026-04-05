@@ -1555,6 +1555,17 @@ func (s *Server) extractRequiredEnvKeys(req CreateAgentRequest) ([]string, map[s
 			}
 		}
 		if authType == "" {
+			resolvedEnvKeys := make(map[string]struct{})
+			for k, v := range req.ResolvedEnv {
+				if v != "" {
+					resolvedEnvKeys[k] = struct{}{}
+				}
+			}
+			if detected := harness.DetectAuthTypeFromEnvVars(harnessType, resolvedEnvKeys); detected != "" {
+				authType = detected
+			}
+		}
+		if authType == "" {
 			if detected := harness.DetectAuthTypeFromGCPIdentity(harnessType, gcpSAAssigned); detected != "" {
 				authType = detected
 			}
