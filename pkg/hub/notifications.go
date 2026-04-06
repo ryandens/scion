@@ -36,9 +36,9 @@ type NotificationDispatcher struct {
 	events          *ChannelEventPublisher
 	getDispatcher   func() AgentDispatcher // lazy getter; dispatcher may be set after startup
 	log             *slog.Logger
-	messageLog      *slog.Logger          // dedicated message audit logger (nil = disabled)
-	channelRegistry *ChannelRegistry      // external notification channels (nil = disabled)
-	brokerProxy     *MessageBrokerProxy   // broker plugin proxy (nil = no broker, use ChannelRegistry)
+	messageLog      *slog.Logger        // dedicated message audit logger (nil = disabled)
+	channelRegistry *ChannelRegistry    // external notification channels (nil = disabled)
+	brokerProxy     *MessageBrokerProxy // broker plugin proxy (nil = no broker, use ChannelRegistry)
 	stopCh          chan struct{}
 	stopOnce        sync.Once
 	wg              sync.WaitGroup

@@ -29,7 +29,7 @@ type DiscoveredPlugin struct {
 	Type        string // "broker" or "harness"
 	Path        string // absolute path to the binary (empty for self-managed plugins)
 	Config      map[string]string
-	FromConfig  bool // true if found via settings, false if auto-discovered
+	FromConfig  bool   // true if found via settings, false if auto-discovered
 	SelfManaged bool   // true if the plugin manages its own process lifecycle
 	Address     string // RPC address for self-managed plugins
 }

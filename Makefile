@@ -14,7 +14,7 @@ GOLANGCI_LINT := $(shell command -v golangci-lint 2>/dev/null || echo $(shell go
 
 .DEFAULT_GOAL := help
 
-.PHONY: all build install test test-fast vet lint golangci-lint web web-typecheck fmt ci ci-full clean help container-sciontool container-scion container-binaries
+.PHONY: all build install test test-fast vet lint golangci-lint web web-typecheck fmt fmt-check ci ci-full clean help container-sciontool container-scion container-binaries
 
 ## all: Build the web frontend, then compile the Go binary with embedded assets
 all: web install
@@ -103,13 +103,24 @@ fmt:
 	@gofmt -w .
 	@echo "Go formatting done."
 
-## ci: Run fast CI checks (format, vet, tests, build)
-ci: fmt lint test-fast build
+## fmt-check: Check Go formatting without modifying files (mirrors GitHub Actions)
+fmt-check:
+	@echo "Checking Go formatting..."
+	@UNFORMATTED=$$(gofmt -l .); \
+	if [ -n "$$UNFORMATTED" ]; then \
+		echo "Go formatting issues found. Run 'make fmt' to fix:"; \
+		echo "$$UNFORMATTED"; \
+		exit 1; \
+	fi
+	@echo "Go formatting OK."
+
+## ci: Run fast CI checks (format check, vet, tests, build)
+ci: fmt-check lint test-fast build
 	@echo ""
 	@echo "CI passed."
 
 ## ci-full: Run the full CI pipeline locally (mirrors GitHub Actions, includes web + golangci-lint)
-ci-full: fmt web web-typecheck lint golangci-lint test-fast build
+ci-full: fmt-check web web-typecheck lint golangci-lint test-fast build
 	@echo ""
 	@echo "CI (full) passed."
 

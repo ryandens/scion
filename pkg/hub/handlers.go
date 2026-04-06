@@ -6276,9 +6276,9 @@ func (s *Server) ensureProgenyPolicy(ctx context.Context, meta *secret.SecretMet
 				},
 			},
 			Labels: map[string]string{
-				"scion.dev/managed-by":  "progeny-secret-access",
-				"scion.dev/secret-key":  meta.Name,
-				"scion.dev/secret-id":   meta.ID,
+				"scion.dev/managed-by":   "progeny-secret-access",
+				"scion.dev/secret-key":   meta.Name,
+				"scion.dev/secret-id":    meta.ID,
 				"scion.dev/secret-scope": meta.Scope,
 			},
 			CreatedBy: meta.CreatedBy,

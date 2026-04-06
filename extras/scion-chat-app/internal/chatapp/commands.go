@@ -64,9 +64,9 @@ type CommandRouter struct {
 	broker      *BrokerServer
 	log         *slog.Logger
 
-	mu              sync.Mutex
-	pendingAuth     map[string]*pendingDeviceAuth // keyed by platformUserID+platform
-	pendingDeletes  map[string]string             // keyed by actionID -> agentID
+	mu             sync.Mutex
+	pendingAuth    map[string]*pendingDeviceAuth // keyed by platformUserID+platform
+	pendingDeletes map[string]string             // keyed by actionID -> agentID
 }
 
 // NewCommandRouter creates a new command router.

@@ -37,10 +37,10 @@ type EventHandler func(ctx context.Context, event *chatapp.ChatEvent) (*chatapp.
 
 // Adapter implements the chatapp.Messenger interface for Google Chat.
 type Adapter struct {
-	projectID   string
-	externalURL string
-	commandIDs  map[string]string // command ID → command name
-	httpServer  *http.Server
+	projectID    string
+	externalURL  string
+	commandIDs   map[string]string // command ID → command name
+	httpServer   *http.Server
 	eventHandler EventHandler
 	httpClient   *http.Client // authenticated client for Chat API calls
 	log          *slog.Logger
@@ -337,15 +337,15 @@ type rawChatPayload struct {
 }
 
 type rawMessagePayload struct {
-	Message                  *rawMessage `json:"message,omitempty"`
-	Space                    *rawSpace   `json:"space,omitempty"`
-	ConfigCompleteRedirectUri string     `json:"configCompleteRedirectUri,omitempty"`
+	Message                   *rawMessage `json:"message,omitempty"`
+	Space                     *rawSpace   `json:"space,omitempty"`
+	ConfigCompleteRedirectUri string      `json:"configCompleteRedirectUri,omitempty"`
 }
 
 type rawAddedToSpacePayload struct {
-	Space                    *rawSpace `json:"space,omitempty"`
-	InteractionAdd           bool      `json:"interactionAdd"`
-	ConfigCompleteRedirectUri string   `json:"configCompleteRedirectUri,omitempty"`
+	Space                     *rawSpace `json:"space,omitempty"`
+	InteractionAdd            bool      `json:"interactionAdd"`
+	ConfigCompleteRedirectUri string    `json:"configCompleteRedirectUri,omitempty"`
 }
 
 type rawRemovedFromSpacePayload struct {

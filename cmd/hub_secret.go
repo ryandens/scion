@@ -30,12 +30,12 @@ import (
 )
 
 var (
-	secretGroveScope  string
-	secretBrokerScope string
-	secretScope       string
-	secretOutputJSON  bool
-	secretType        string
-	secretTarget      string
+	secretGroveScope   string
+	secretBrokerScope  string
+	secretScope        string
+	secretOutputJSON   bool
+	secretType         string
+	secretTarget       string
 	secretAllowProgeny bool
 )
 
