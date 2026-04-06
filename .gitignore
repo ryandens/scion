@@ -6,6 +6,7 @@
 /.build/
 /scion
 scion-agent
+extras/scion-chat-app/scion-chat-app
 
 # secrets
 TEST_GEMINI_KEY

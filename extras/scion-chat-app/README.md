@@ -1,6 +1,6 @@
 # Scion Chat App
 
-A standalone service that bridges Google Chat (and future Slack) with the Scion Hub, enabling users to manage agents and receive notifications directly from their chat workspace. Runs as both a message broker plugin for real-time agent communication and an API proxy for operational commands.
+A standalone service that bridges Google Chat (and future Slack) with the Scion Hub, enabling users to manage agents and receive notifications directly from their chat workspace. Built as a Google Workspace Add-on (HTTP Service), it runs as both a message broker plugin for real-time agent communication and an API proxy for operational commands.
 
 ## Features
 
@@ -57,23 +57,26 @@ gcloud iam service-accounts keys create chat-sa-key.json \
   --iam-account=scion-chat-app@my-scion-chat.iam.gserviceaccount.com
 ```
 
-### 4. Register the Google Chat App
+### 4. Register as a Workspace Add-on
 
 1. Go to the [Google Cloud Console](https://console.cloud.google.com) > **APIs & Services** > **Google Chat API** > **Configuration**
 2. Set **App name** and **Avatar URL** (e.g., "Scion")
 3. Under **Functionality**, enable:
    - Receive 1:1 messages
    - Join spaces and group conversations
-4. Under **Connection settings**, select **HTTP endpoint URL** and enter:
+4. Under **Connection settings**, select **HTTP Service** as the app type and enter your endpoint URL:
    ```
-   https://<YOUR_CHAT_APP_URL>/events
+   https://<YOUR_CHAT_APP_URL>/chat/events
    ```
 5. Under **Slash commands**, add:
    | Command ID | Command  | Description                |
    |------------|----------|----------------------------|
    | 1          | `/scion` | Scion agent management     |
-6. Under **Permissions**, configure which users/OUs can install the app
-7. Note the **Project number** (used as the `audience` in configuration)
+
+   Note the numeric **Command ID** assigned by the console — you'll need it for the `command_id_map` configuration.
+6. Set the **Card interaction URL** to the same endpoint URL (for backward compatibility with pre-migration cards)
+7. Under **Permissions**, configure which users/OUs can install the app
+8. Note the **service account email** shown on the configuration page (used for request verification)
 
 ## Configuration
 
@@ -101,10 +104,15 @@ platforms:
     project_id: "my-scion-chat"
     # Service account key for Google Chat API calls
     credentials: "/path/to/chat-sa-key.json"
-    # HTTP endpoint for receiving Google Chat webhook events
+    # HTTP endpoint for receiving Google Chat events
     listen_address: ":8443"
-    # Verification audience (GCP project number, from Chat API config)
-    audience: "1234567890"
+    # Public URL of this endpoint (used for action URLs in cards and token audience verification)
+    external_url: "https://scion-chat-app-xxxxx.run.app/chat/events"
+    # Per-project service account email for request verification (from Chat API config page)
+    service_account_email: "chat@my-scion-chat.iam.gserviceaccount.com"
+    # Mapping of numeric command IDs (assigned in Console) to command names
+    command_id_map:
+      "1": "scion"
 
   slack:
     enabled: false
@@ -137,15 +145,12 @@ Environment variables in the form `${VAR}` or `$VAR` are expanded in the config 
 Register the chat app as a self-managed broker plugin in the Hub's settings:
 
 ```yaml
-# In Hub settings (scion-settings.yaml or equivalent)
+# In Hub settings.yaml (added automatically by make install)
 plugins:
   broker:
     googlechat:
       self_managed: true
       address: "localhost:9090"
-      config:
-        hub_endpoint: "https://hub.example.com"
-        project_id: "my-scion-chat"
 ```
 
 ## Local Development
@@ -168,7 +173,10 @@ platforms:
     project_id: "my-gcp-project"
     credentials: "./chat-sa-key.json"
     listen_address: ":8443"
-    audience: "1234567890"
+    external_url: "https://<YOUR_TUNNEL_URL>/chat/events"
+    service_account_email: "chat@my-gcp-project.iam.gserviceaccount.com"
+    command_id_map:
+      "1": "scion"
 state:
   database: "./scion-chat-app.db"
 logging:
@@ -181,10 +189,10 @@ go run ./cmd/scion-chat-app/ --config dev-config.yaml
 ```
 
 The app starts two servers:
-- **Port 8443** - Google Chat webhook endpoint (receives events from Google Chat)
+- **Port 8443** - Google Chat HTTP event endpoint (receives events from Google Chat)
 - **Port 9090** - Broker plugin RPC server (receives messages from the Hub)
 
-### Testing Webhooks Locally
+### Testing Locally with a Tunnel
 
 Google Chat sends events to the configured HTTP endpoint. For local development, use a tunnel service (e.g., `ngrok`, `cloudflared`) to expose port 8443:
 
@@ -192,13 +200,47 @@ Google Chat sends events to the configured HTTP endpoint. For local development,
 ngrok http 8443
 ```
 
-Then update the Google Chat API configuration in the GCP Console with the tunnel URL (e.g., `https://abc123.ngrok.io/events`).
+Then update both the **HTTP endpoint URL** and the **Card interaction URL** in the Chat API configuration page to use the tunnel URL (e.g., `https://abc123.ngrok.io/chat/events`). Also set `external_url` in your dev config to match.
 
 ## Testing
 
 ```bash
 cd extras/scion-chat-app
 go test ./...
+```
+
+## Install on a Provisioned Hub VM
+
+If the Hub was deployed via `scripts/starter-hub/`, the chat app can be installed alongside it with `make install`. This builds the binary, installs a systemd unit, generates the runtime config, patches the Caddyfile for path-based routing, and adds the broker plugin entry to the Hub's `settings.yaml`.
+
+The install is idempotent — re-run it after any hub update (`gce-start-hub.sh --full`) to re-apply patches to files the hub scripts may have overwritten.
+
+```bash
+# On the Hub VM, as a user with sudo access:
+cd ~/scion/extras/scion-chat-app
+
+# First time only: create the chat-app env file from the sample
+sudo cp chat-app.env.sample /home/scion/.scion/chat-app.env
+sudo chown scion:scion /home/scion/.scion/chat-app.env
+sudo chmod 600 /home/scion/.scion/chat-app.env
+# Edit with your values (project ID, SA email, credentials path, hub user)
+sudo vi /home/scion/.scion/chat-app.env
+
+# Build and install (re-run this after hub updates)
+make install
+```
+
+After install, restart the Hub to pick up the new plugin config:
+
+```bash
+sudo systemctl restart scion-hub
+```
+
+Check status:
+
+```bash
+sudo systemctl status scion-chat-app
+journalctl -u scion-chat-app -f
 ```
 
 ## Docker Build
@@ -254,7 +296,29 @@ gcloud run services update scion-chat-app \
   --update-secrets=/etc/scion-chat-app/config.yaml=scion-chat-app-config:latest
 ```
 
-Update the Google Chat API HTTP endpoint URL in the GCP Console to point to the Cloud Run service URL (e.g., `https://scion-chat-app-xxxxx.run.app/events`).
+Update the **HTTP endpoint URL** and **Card interaction URL** in the Chat API configuration page to point to the Cloud Run service URL (e.g., `https://scion-chat-app-xxxxx.run.app/chat/events`). Use the same URL as the `external_url` in your config.
+
+### Co-hosting with the Hub behind Caddy
+
+The chat app uses the `/chat/` path prefix so it can share a domain with the Scion Hub via a reverse proxy. `make install` patches the Caddyfile automatically, but if you're configuring manually, the resulting Caddyfile looks like:
+
+```
+scion.example.com {
+    # Chat app (Google Workspace Add-on endpoint)
+    handle /chat/* {
+        reverse_proxy localhost:8443
+    }
+
+    # Hub API and Web UI
+    handle {
+        reverse_proxy localhost:8080
+    }
+
+    tls /etc/letsencrypt/live/scion.example.com/fullchain.pem /etc/letsencrypt/live/scion.example.com/privkey.pem
+}
+```
+
+In this setup, set `external_url` to `https://scion.example.com/chat/events` and register that as the HTTP endpoint URL in the Chat API configuration.
 
 ## Slash Commands
 
@@ -287,12 +351,14 @@ You can also @mention the bot to send messages to agents:
 ## Architecture
 
 ```
-Google Chat ──webhooks──> scion-chat-app ──Hub API──> Scion Hub
-                              │                          │
-                              │◄──broker plugin (RPC)────┘
-                              │
-                          SQLite (local state)
+Google Chat ──HTTP events──> scion-chat-app ──Hub API──> Scion Hub
+                                  │  │                       │
+                   sync responses─┘  │◄──broker plugin (RPC)─┘
+                                     │
+                                 SQLite (local state)
 ```
+
+The app uses the **Workspace Add-on HTTP Service** model. Google Chat sends events as nested `EventObject` payloads (with `commonEventObject` and `chat` sub-objects). Interactive features like dialogs and card updates use **synchronous JSON responses** in the HTTP response body, while background notifications continue to use the async Chat REST API.
 
 The chat app operates under three identity contexts:
 
@@ -304,9 +370,9 @@ The chat app operates under three identity contexts:
 
 | Port | Purpose |
 |------|---------|
-| 8443 | Google Chat webhook endpoint |
+| 8443 | Google Chat HTTP event endpoint |
 | 9090 | Broker plugin RPC server |
 
 ## Health Check
 
-The app exposes a `/healthz` endpoint on the webhook server (port 8443) that checks Hub API reachability, broker plugin connection, and database accessibility.
+The app exposes a `/chat/healthz` endpoint on the event server (port 8443) that checks Hub API reachability, broker plugin connection, and database accessibility.

@@ -82,8 +82,8 @@ func NewAdapter(cfg Config, handler EventHandler, httpClient *http.Client, log *
 // Start begins serving the HTTP webhook endpoint for Google Chat events.
 func (a *Adapter) Start(listenAddr string) error {
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /", a.handleEvent)
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /chat/events", a.handleEvent)
+	mux.HandleFunc("GET /chat/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprint(w, "ok")
 	})
