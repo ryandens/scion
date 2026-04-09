@@ -22,6 +22,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/GoogleCloudPlatform/scion/pkg/api"
 	"github.com/GoogleCloudPlatform/scion/pkg/util"
@@ -233,14 +234,21 @@ func (r *CodespaceRuntime) Run(ctx context.Context, config RunConfig) (string, e
 		args = append(args, "-b", branch)
 	}
 
-	// Create codespace (blocks until ready)
+	// Create codespace (blocks until ready).
+	// gh cs create may emit progress lines (e.g. "✓ Codespaces usage ...") before
+	// the actual codespace name on the last line.
 	out, err := runSimpleCommand(ctx, r.Command, args...)
 	if err != nil {
 		return "", fmt.Errorf("failed to create codespace: %w (output: %s)", err, out)
 	}
-	codespaceName := strings.TrimSpace(out)
+	codespaceName := lastNonEmptyLine(out)
 	if codespaceName == "" {
-		return "", fmt.Errorf("gh cs create returned empty codespace name")
+		return "", fmt.Errorf("gh cs create returned empty codespace name (full output: %s)", out)
+	}
+
+	// Wait for the codespace to reach "Available" state before SSH/cp operations.
+	if err := r.waitForReady(ctx, codespaceName); err != nil {
+		return "", fmt.Errorf("codespace %s did not become ready: %w", codespaceName, err)
 	}
 
 	// Collect environment variables
@@ -308,6 +316,56 @@ func (r *CodespaceRuntime) Run(ctx context.Context, config RunConfig) (string, e
 	return codespaceName, nil
 }
 
+// codespaceViewEntry represents the JSON output from gh cs view.
+type codespaceViewEntry struct {
+	Name  string `json:"name"`
+	State string `json:"state"`
+}
+
+// waitForReady polls the codespace state until it reaches "Available" or the
+// context is cancelled. Codespaces transition through "Starting" → "Available".
+func (r *CodespaceRuntime) waitForReady(ctx context.Context, codespaceName string) error {
+	const (
+		pollInterval = 5 * time.Second
+		timeout      = 10 * time.Minute
+	)
+
+	deadline := time.Now().Add(timeout)
+	for {
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timed out after %v waiting for codespace to become available", timeout)
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		out, err := runSimpleCommand(ctx, r.Command, "cs", "view", "-c", codespaceName, "--json", "name,state")
+		if err != nil {
+			runtimeLog.Debug("waitForReady: view failed, retrying", "codespace", codespaceName, "error", err)
+			time.Sleep(pollInterval)
+			continue
+		}
+
+		var entry codespaceViewEntry
+		if err := json.Unmarshal([]byte(out), &entry); err != nil {
+			runtimeLog.Debug("waitForReady: failed to parse view output", "output", out, "error", err)
+			time.Sleep(pollInterval)
+			continue
+		}
+
+		switch entry.State {
+		case "Available":
+			return nil
+		case "Shutdown", "ShuttingDown", "Failed":
+			return fmt.Errorf("codespace reached terminal state %q", entry.State)
+		default:
+			// Starting, Provisioning, etc. — keep polling
+			runtimeLog.Debug("waitForReady: codespace not ready yet", "codespace", codespaceName, "state", entry.State)
+			time.Sleep(pollInterval)
+		}
+	}
+}
+
 // buildEnvScript collects environment variables from the RunConfig and returns
 // export statements suitable for a bash script.
 func (r *CodespaceRuntime) buildEnvScript(config RunConfig) []string {
@@ -338,6 +396,18 @@ func (r *CodespaceRuntime) buildEnvScript(config RunConfig) []string {
 	}
 
 	return lines
+}
+
+// lastNonEmptyLine returns the last non-empty line from multi-line output.
+// gh CLI commands often print progress/status lines before the actual result.
+func lastNonEmptyLine(s string) string {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if line := strings.TrimSpace(lines[i]); line != "" {
+			return line
+		}
+	}
+	return ""
 }
 
 // shellQuote wraps a value in single quotes for safe shell expansion.

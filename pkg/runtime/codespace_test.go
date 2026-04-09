@@ -168,6 +168,29 @@ func TestCodespaceMetadata_RoundTrip(t *testing.T) {
 	}
 }
 
+func TestLastNonEmptyLine(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{"single line", "codespace-name", "codespace-name"},
+		{"with progress line", "✓ Codespaces usage for this repository is paid for by pixee\ncodespace-name", "codespace-name"},
+		{"trailing newline", "codespace-name\n", "codespace-name"},
+		{"multiple progress lines", "line1\nline2\ncodespace-name\n", "codespace-name"},
+		{"empty", "", ""},
+		{"only whitespace", "  \n  \n", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := lastNonEmptyLine(tt.input)
+			if got != tt.expected {
+				t.Errorf("lastNonEmptyLine(%q) = %q, want %q", tt.input, got, tt.expected)
+			}
+		})
+	}
+}
+
 func TestShellQuote(t *testing.T) {
 	tests := []struct {
 		input    string
