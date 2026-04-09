@@ -323,6 +323,13 @@ func (r *CodespaceRuntime) buildStartupScript(config RunConfig) (string, error) 
 CLAUDE_EOF
 fi
 `, wsPath))
+
+	// Pre-seed Claude Code settings to skip the bypass-permissions confirmation.
+	script.WriteString(`mkdir -p "$HOME/.claude"
+if [ ! -f "$HOME/.claude/settings.json" ]; then
+  echo '{"skipDangerousModePermissionPrompt":true}' > "$HOME/.claude/settings.json"
+fi
+`)
 	}
 
 	for _, line := range envLines {
