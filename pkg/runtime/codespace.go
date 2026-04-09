@@ -444,8 +444,35 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
 
+// resolveCodespaceName maps an id (which may be an agent name/slug or a
+// codespace name) to the actual codespace name. It first checks if id is
+// already a known codespace name via local metadata, then falls back to
+// searching by agent name in the display-name convention "scion-<name>".
+func (r *CodespaceRuntime) resolveCodespaceName(ctx context.Context, id string) (string, error) {
+	// If local metadata exists for this id, it's already a codespace name.
+	if _, err := loadCodespaceMetadata(id); err == nil {
+		return id, nil
+	}
+
+	// Otherwise, search by listing codespaces and matching by agent name.
+	agents, err := r.List(ctx, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to list codespaces to resolve %q: %w", id, err)
+	}
+	for _, a := range agents {
+		if a.Name == id || a.ContainerID == id {
+			return a.ContainerID, nil
+		}
+	}
+	return "", fmt.Errorf("no codespace found for agent %q", id)
+}
+
 func (r *CodespaceRuntime) Stop(ctx context.Context, id string) error {
-	out, err := runSimpleCommand(ctx, r.Command, "cs", "stop", "-c", id)
+	csName, err := r.resolveCodespaceName(ctx, id)
+	if err != nil {
+		return err
+	}
+	out, err := runSimpleCommand(ctx, r.Command, "cs", "stop", "-c", csName)
 	if err != nil {
 		return fmt.Errorf("failed to stop codespace: %w (output: %s)", err, out)
 	}
@@ -453,11 +480,15 @@ func (r *CodespaceRuntime) Stop(ctx context.Context, id string) error {
 }
 
 func (r *CodespaceRuntime) Delete(ctx context.Context, id string) error {
-	out, err := runSimpleCommand(ctx, r.Command, "cs", "delete", "-c", id, "-f")
+	csName, err := r.resolveCodespaceName(ctx, id)
+	if err != nil {
+		return err
+	}
+	out, err := runSimpleCommand(ctx, r.Command, "cs", "delete", "-c", csName, "-f")
 	if err != nil {
 		return fmt.Errorf("failed to delete codespace: %w (output: %s)", err, out)
 	}
-	deleteCodespaceMetadata(id)
+	deleteCodespaceMetadata(csName)
 	return nil
 }
 
@@ -552,11 +583,19 @@ func (r *CodespaceRuntime) List(ctx context.Context, labelFilter map[string]stri
 }
 
 func (r *CodespaceRuntime) GetLogs(ctx context.Context, id string) (string, error) {
-	return runSimpleCommand(ctx, r.Command, "cs", "logs", "-c", id)
+	csName, err := r.resolveCodespaceName(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	return runSimpleCommand(ctx, r.Command, "cs", "logs", "-c", csName)
 }
 
 func (r *CodespaceRuntime) Attach(ctx context.Context, id string) error {
-	return runInteractiveCommand(r.Command, "cs", "ssh", "-c", id, "--", "tmux", "attach", "-t", "scion")
+	csName, err := r.resolveCodespaceName(context.Background(), id)
+	if err != nil {
+		return err
+	}
+	return runInteractiveCommand(r.Command, "cs", "ssh", "-c", csName, "--", "tmux", "attach", "-t", "scion")
 }
 
 // ImageExists always returns true for codespaces since they use devcontainer
@@ -572,7 +611,11 @@ func (r *CodespaceRuntime) PullImage(ctx context.Context, image string) error {
 
 // Sync copies files between the local workspace and the codespace using gh cs cp.
 func (r *CodespaceRuntime) Sync(ctx context.Context, id string, direction SyncDirection) error {
-	meta, err := loadCodespaceMetadata(id)
+	csName, err := r.resolveCodespaceName(ctx, id)
+	if err != nil {
+		return err
+	}
+	meta, err := loadCodespaceMetadata(csName)
 	if err != nil {
 		return fmt.Errorf("failed to load codespace metadata: %w", err)
 	}
@@ -599,10 +642,10 @@ func (r *CodespaceRuntime) Sync(ctx context.Context, id string, direction SyncDi
 
 	switch direction {
 	case SyncTo:
-		_, err := runSimpleCommand(ctx, r.Command, "cs", "cp", "-c", id, "-r", localWorkspace+"/.", fmt.Sprintf("remote:%s/", remoteWorkspace))
+		_, err := runSimpleCommand(ctx, r.Command, "cs", "cp", "-c", csName, "-r", localWorkspace+"/.", fmt.Sprintf("remote:%s/", remoteWorkspace))
 		return err
 	case SyncFrom:
-		_, err := runSimpleCommand(ctx, r.Command, "cs", "cp", "-c", id, "-r", fmt.Sprintf("remote:%s/.", remoteWorkspace), localWorkspace+"/")
+		_, err := runSimpleCommand(ctx, r.Command, "cs", "cp", "-c", csName, "-r", fmt.Sprintf("remote:%s/.", remoteWorkspace), localWorkspace+"/")
 		return err
 	default:
 		return fmt.Errorf("sync direction must be specified for codespace runtime")
@@ -610,7 +653,11 @@ func (r *CodespaceRuntime) Sync(ctx context.Context, id string, direction SyncDi
 }
 
 func (r *CodespaceRuntime) Exec(ctx context.Context, id string, cmd []string) (string, error) {
-	args := append([]string{"cs", "ssh", "-c", id, "--"}, cmd...)
+	csName, err := r.resolveCodespaceName(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	args := append([]string{"cs", "ssh", "-c", csName, "--"}, cmd...)
 	return runSimpleCommand(ctx, r.Command, args...)
 }
 
@@ -618,9 +665,13 @@ func (r *CodespaceRuntime) Exec(ctx context.Context, id string, cmd []string) (s
 // Since codespaces are remote, this returns the path from local metadata
 // where synced files would be found.
 func (r *CodespaceRuntime) GetWorkspacePath(ctx context.Context, id string) (string, error) {
-	meta, err := loadCodespaceMetadata(id)
+	csName, err := r.resolveCodespaceName(ctx, id)
 	if err != nil {
-		return "", fmt.Errorf("failed to load codespace metadata for %s: %w", id, err)
+		return "", err
+	}
+	meta, err := loadCodespaceMetadata(csName)
+	if err != nil {
+		return "", fmt.Errorf("failed to load codespace metadata for %s: %w", csName, err)
 	}
 
 	grovePath := meta.Annotations["scion.grove_path"]

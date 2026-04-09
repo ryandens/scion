@@ -320,7 +320,11 @@ func TestCodespaceRuntime_Exec_MockGH(t *testing.T) {
 	mockGH := filepath.Join(tmpDir, "mock-gh")
 
 	script := `#!/bin/sh
-echo "$@"
+if [ "$1" = "cs" ] && [ "$2" = "list" ]; then
+  echo '[{"name":"my-codespace","displayName":"scion-my-agent","state":"Available","repository":"owner/repo","machineName":"basicLinux32gb","owner":"user"}]'
+else
+  echo "$@"
+fi
 `
 	if err := os.WriteFile(mockGH, []byte(script), 0755); err != nil {
 		t.Fatalf("failed to write mock gh: %v", err)
@@ -328,11 +332,13 @@ echo "$@"
 
 	rt := &CodespaceRuntime{Command: mockGH}
 
-	out, err := rt.Exec(context.Background(), "my-codespace", []string{"tmux", "send-keys", "-t", "scion:0", "Enter"})
+	// Pass agent name "my-agent" — resolveCodespaceName should find "my-codespace"
+	out, err := rt.Exec(context.Background(), "my-agent", []string{"tmux", "send-keys", "-t", "scion:0", "Enter"})
 	if err != nil {
 		t.Fatalf("Exec failed: %v", err)
 	}
 
+	// The resolved codespace name should appear in the ssh command
 	if !contains(out, "cs ssh -c my-codespace --") {
 		t.Errorf("expected 'cs ssh -c my-codespace --' in output, got %q", out)
 	}
@@ -359,14 +365,18 @@ func TestCodespaceRuntime_Stop_MockGH(t *testing.T) {
 	mockGH := filepath.Join(tmpDir, "mock-gh")
 
 	script := `#!/bin/sh
-echo "stopped"
+if [ "$1" = "cs" ] && [ "$2" = "list" ]; then
+  echo '[{"name":"my-codespace","displayName":"scion-my-agent","state":"Available","repository":"owner/repo","machineName":"basicLinux32gb","owner":"user"}]'
+else
+  echo "stopped"
+fi
 `
 	if err := os.WriteFile(mockGH, []byte(script), 0755); err != nil {
 		t.Fatalf("failed to write mock gh: %v", err)
 	}
 
 	rt := &CodespaceRuntime{Command: mockGH}
-	if err := rt.Stop(context.Background(), "my-codespace"); err != nil {
+	if err := rt.Stop(context.Background(), "my-agent"); err != nil {
 		t.Errorf("Stop failed: %v", err)
 	}
 }
