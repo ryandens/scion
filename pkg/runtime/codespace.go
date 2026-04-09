@@ -1,0 +1,535 @@
+// Copyright 2026 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package runtime
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+
+	"github.com/GoogleCloudPlatform/scion/pkg/api"
+	"github.com/GoogleCloudPlatform/scion/pkg/util"
+)
+
+// CodespaceRuntime implements the Runtime interface using GitHub Codespaces
+// via the gh CLI. Each agent runs as a tmux session inside a codespace.
+type CodespaceRuntime struct {
+	Command          string // CLI binary, default "gh"
+	Repo             string // Explicit owner/repo override
+	Machine          string // Machine type (e.g. "basicLinux32gb")
+	IdleTimeout      string // Idle timeout (e.g. "30m")
+	RetentionPeriod  string // Retention period (e.g. "720h")
+	DevcontainerPath string // Path to devcontainer.json inside the repo
+}
+
+func NewCodespaceRuntime() *CodespaceRuntime {
+	return &CodespaceRuntime{
+		Command: "gh",
+	}
+}
+
+func (r *CodespaceRuntime) Name() string {
+	return "codespace"
+}
+
+// ExecUser returns an empty string because gh cs ssh connects as the
+// default codespace user; there is no --user flag to pass.
+func (r *CodespaceRuntime) ExecUser() string {
+	return ""
+}
+
+// codespaceMetadata is persisted locally so that List() can reconstruct
+// AgentInfo labels without SSH-ing into every codespace.
+type codespaceMetadata struct {
+	CodespaceName string            `json:"codespace_name"`
+	Labels        map[string]string `json:"labels"`
+	Annotations   map[string]string `json:"annotations"`
+	Image         string            `json:"image"`
+	Repo          string            `json:"repo"`
+}
+
+// metadataDir returns the directory where codespace metadata files are stored.
+func metadataDir() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".scion", "codespaces")
+}
+
+func metadataPath(codespaceName string) string {
+	return filepath.Join(metadataDir(), codespaceName+".json")
+}
+
+func saveCodespaceMetadata(m codespaceMetadata) error {
+	dir := metadataDir()
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	data, err := json.Marshal(m)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(metadataPath(m.CodespaceName), data, 0644)
+}
+
+func loadCodespaceMetadata(codespaceName string) (codespaceMetadata, error) {
+	var m codespaceMetadata
+	data, err := os.ReadFile(metadataPath(codespaceName))
+	if err != nil {
+		return m, err
+	}
+	err = json.Unmarshal(data, &m)
+	return m, err
+}
+
+func loadAllCodespaceMetadata() map[string]codespaceMetadata {
+	result := make(map[string]codespaceMetadata)
+	dir := metadataDir()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return result
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		name := strings.TrimSuffix(e.Name(), ".json")
+		if m, err := loadCodespaceMetadata(name); err == nil {
+			result[name] = m
+		}
+	}
+	return result
+}
+
+func deleteCodespaceMetadata(codespaceName string) {
+	_ = os.Remove(metadataPath(codespaceName))
+}
+
+// resolveRepo determines the GitHub owner/repo for codespace creation.
+// It checks (in order): explicit config, RunConfig labels, git remote of the workspace.
+func (r *CodespaceRuntime) resolveRepo(config RunConfig) string {
+	if r.Repo != "" {
+		return r.Repo
+	}
+
+	// Try to extract from the workspace or repo root git remote
+	dir := config.RepoRoot
+	if dir == "" {
+		dir = config.Workspace
+	}
+	if dir == "" {
+		return ""
+	}
+
+	remote := util.GetGitRemoteDir(dir)
+	if remote == "" {
+		return ""
+	}
+	return extractOwnerRepoFromRemote(remote)
+}
+
+// extractOwnerRepoFromRemote extracts "owner/repo" from a git remote URL.
+func extractOwnerRepoFromRemote(remote string) string {
+	remote = strings.TrimSpace(remote)
+
+	// Handle SSH format: git@github.com:owner/repo.git
+	if strings.Contains(remote, ":") && strings.Contains(remote, "@") {
+		parts := strings.SplitN(remote, ":", 2)
+		if len(parts) == 2 {
+			path := strings.TrimSuffix(parts[1], ".git")
+			path = strings.TrimPrefix(path, "/")
+			if isOwnerRepo(path) {
+				return path
+			}
+		}
+	}
+
+	// Handle HTTPS: https://github.com/owner/repo.git
+	for _, prefix := range []string{"https://", "http://", "ssh://", "git://"} {
+		remote = strings.TrimPrefix(remote, prefix)
+	}
+
+	// Strip user info (e.g., x-access-token:TOKEN@)
+	if idx := strings.Index(remote, "@"); idx >= 0 {
+		remote = remote[idx+1:]
+	}
+
+	remote = strings.TrimSuffix(remote, ".git")
+
+	// Split host/owner/repo
+	parts := strings.SplitN(remote, "/", 2)
+	if len(parts) == 2 {
+		ownerRepo := parts[1]
+		if isOwnerRepo(ownerRepo) {
+			return ownerRepo
+		}
+	}
+
+	return ""
+}
+
+func isOwnerRepo(s string) bool {
+	parts := strings.Split(s, "/")
+	return len(parts) == 2 && parts[0] != "" && parts[1] != ""
+}
+
+// getCurrentBranch returns the current git branch of the workspace directory.
+func getCurrentBranch(config RunConfig) string {
+	dir := config.Workspace
+	if dir == "" {
+		dir = config.RepoRoot
+	}
+	if dir == "" {
+		return ""
+	}
+	cmd := exec.Command("git", "-C", dir, "rev-parse", "--abbrev-ref", "HEAD")
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func (r *CodespaceRuntime) Run(ctx context.Context, config RunConfig) (string, error) {
+	repo := r.resolveRepo(config)
+	if repo == "" {
+		return "", fmt.Errorf("could not determine GitHub repository; set repo in codespace runtime config or ensure a git remote exists")
+	}
+
+	// Build gh cs create args
+	displayName := fmt.Sprintf("scion-%s", config.Name)
+	if len(displayName) > 48 {
+		displayName = displayName[:48]
+	}
+
+	args := []string{"cs", "create", "-R", repo, "-d", displayName}
+	if r.Machine != "" {
+		args = append(args, "-m", r.Machine)
+	}
+	if r.IdleTimeout != "" {
+		args = append(args, "--idle-timeout", r.IdleTimeout)
+	}
+	if r.RetentionPeriod != "" {
+		args = append(args, "--retention-period", r.RetentionPeriod)
+	}
+	if r.DevcontainerPath != "" {
+		args = append(args, "--devcontainer-path", r.DevcontainerPath)
+	}
+	if branch := getCurrentBranch(config); branch != "" {
+		args = append(args, "-b", branch)
+	}
+
+	// Create codespace (blocks until ready)
+	out, err := runSimpleCommand(ctx, r.Command, args...)
+	if err != nil {
+		return "", fmt.Errorf("failed to create codespace: %w (output: %s)", err, out)
+	}
+	codespaceName := strings.TrimSpace(out)
+	if codespaceName == "" {
+		return "", fmt.Errorf("gh cs create returned empty codespace name")
+	}
+
+	// Collect environment variables
+	envLines := r.buildEnvScript(config)
+
+	// Build harness command
+	if config.Harness == nil {
+		return "", fmt.Errorf("no harness provided")
+	}
+	harnessArgs := config.Harness.GetCommand(config.Task, config.Resume, config.CommandArgs)
+	var quotedArgs []string
+	for _, a := range harnessArgs {
+		if strings.ContainsAny(a, " \t\n\"'$\\") {
+			quotedArgs = append(quotedArgs, fmt.Sprintf("%q", a))
+		} else {
+			quotedArgs = append(quotedArgs, a)
+		}
+	}
+	cmdLine := strings.Join(quotedArgs, " ")
+
+	tmuxCmd := fmt.Sprintf(
+		"tmux new-session -d -s scion -n agent %s \\; new-window -t scion -n shell \\; select-window -t scion:agent",
+		cmdLine,
+	)
+
+	// Build and upload startup script
+	var script strings.Builder
+	script.WriteString("#!/bin/bash\nset -e\n")
+	for _, line := range envLines {
+		script.WriteString(line)
+		script.WriteString("\n")
+	}
+	script.WriteString(tmuxCmd)
+	script.WriteString("\n")
+
+	tmpFile := filepath.Join(os.TempDir(), fmt.Sprintf("scion-cs-start-%s.sh", config.Name))
+	if err := os.WriteFile(tmpFile, []byte(script.String()), 0755); err != nil {
+		return "", fmt.Errorf("failed to write startup script: %w", err)
+	}
+	defer os.Remove(tmpFile)
+
+	// Copy startup script to codespace
+	_, err = runSimpleCommand(ctx, r.Command, "cs", "cp", "-c", codespaceName, tmpFile, "remote:~/.scion-start.sh")
+	if err != nil {
+		return "", fmt.Errorf("failed to copy startup script to codespace: %w", err)
+	}
+
+	// Execute startup script
+	_, err = runSimpleCommand(ctx, r.Command, "cs", "ssh", "-c", codespaceName, "--", "chmod +x ~/.scion-start.sh && ~/.scion-start.sh")
+	if err != nil {
+		return "", fmt.Errorf("failed to start harness in codespace: %w (codespace: %s)", err, codespaceName)
+	}
+
+	// Persist metadata locally for List()
+	if err := saveCodespaceMetadata(codespaceMetadata{
+		CodespaceName: codespaceName,
+		Labels:        config.Labels,
+		Annotations:   config.Annotations,
+		Image:         config.Image,
+		Repo:          repo,
+	}); err != nil {
+		util.Debugf("codespace: failed to save metadata: %v", err)
+	}
+
+	return codespaceName, nil
+}
+
+// buildEnvScript collects environment variables from the RunConfig and returns
+// export statements suitable for a bash script.
+func (r *CodespaceRuntime) buildEnvScript(config RunConfig) []string {
+	var lines []string
+
+	if config.Harness != nil {
+		for k, v := range config.Harness.GetEnv(config.Name, config.HomeDir, config.UnixUsername) {
+			lines = append(lines, fmt.Sprintf("export %s=%s", k, shellQuote(v)))
+		}
+		if config.TelemetryEnabled {
+			for k, v := range config.Harness.GetTelemetryEnv() {
+				lines = append(lines, fmt.Sprintf("export %s=%s", k, shellQuote(v)))
+			}
+		}
+	}
+
+	for _, e := range config.Env {
+		parts := strings.SplitN(e, "=", 2)
+		if len(parts) == 2 {
+			lines = append(lines, fmt.Sprintf("export %s=%s", parts[0], shellQuote(parts[1])))
+		}
+	}
+
+	for _, s := range config.ResolvedSecrets {
+		if s.Type == "environment" || s.Type == "" {
+			lines = append(lines, fmt.Sprintf("export %s=%s", s.Target, shellQuote(s.Value)))
+		}
+	}
+
+	return lines
+}
+
+// shellQuote wraps a value in single quotes for safe shell expansion.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}
+
+func (r *CodespaceRuntime) Stop(ctx context.Context, id string) error {
+	out, err := runSimpleCommand(ctx, r.Command, "cs", "stop", "-c", id)
+	if err != nil {
+		return fmt.Errorf("failed to stop codespace: %w (output: %s)", err, out)
+	}
+	return nil
+}
+
+func (r *CodespaceRuntime) Delete(ctx context.Context, id string) error {
+	out, err := runSimpleCommand(ctx, r.Command, "cs", "delete", "-c", id, "-f")
+	if err != nil {
+		return fmt.Errorf("failed to delete codespace: %w (output: %s)", err, out)
+	}
+	deleteCodespaceMetadata(id)
+	return nil
+}
+
+// codespaceListEntry represents a single entry from gh cs list --json output.
+type codespaceListEntry struct {
+	Name        string `json:"name"`
+	DisplayName string `json:"displayName"`
+	State       string `json:"state"`
+	Repository  string `json:"repository"`
+	MachineName string `json:"machineName"`
+	Owner       string `json:"owner"`
+}
+
+func (r *CodespaceRuntime) List(ctx context.Context, labelFilter map[string]string) ([]api.AgentInfo, error) {
+	out, err := runSimpleCommand(ctx, r.Command, "cs", "list", "--json", "name,displayName,state,repository,machineName,owner", "-L", "100")
+	if err != nil {
+		return nil, fmt.Errorf("failed to list codespaces: %w", err)
+	}
+
+	var entries []codespaceListEntry
+	if err := json.Unmarshal([]byte(out), &entries); err != nil {
+		return nil, fmt.Errorf("failed to parse codespace list: %w", err)
+	}
+
+	allMeta := loadAllCodespaceMetadata()
+
+	var agents []api.AgentInfo
+	for _, e := range entries {
+		// Only include scion-managed codespaces
+		if !strings.HasPrefix(e.DisplayName, "scion-") {
+			continue
+		}
+
+		labels := map[string]string{
+			"scion.agent": "true",
+		}
+		annotations := map[string]string{}
+		var image, template, harnessConfig, harnessAuth, grove, groveID, grovePath string
+
+		if meta, ok := allMeta[e.Name]; ok {
+			for k, v := range meta.Labels {
+				labels[k] = v
+			}
+			for k, v := range meta.Annotations {
+				annotations[k] = v
+			}
+			image = meta.Image
+			template = labels["scion.template"]
+			harnessConfig = labels["scion.harness_config"]
+			harnessAuth = labels["scion.harness_auth"]
+			grove = labels["scion.grove"]
+			groveID = labels["scion.grove_id"]
+			grovePath = annotations["scion.grove_path"]
+		}
+
+		agentName := labels["scion.name"]
+		if agentName == "" {
+			agentName = strings.TrimPrefix(e.DisplayName, "scion-")
+		}
+
+		// Filter by labels
+		match := true
+		for k, v := range labelFilter {
+			if labels[k] != v && annotations[k] != v {
+				match = false
+				break
+			}
+		}
+		if !match {
+			continue
+		}
+
+		agents = append(agents, api.AgentInfo{
+			ContainerID:     e.Name,
+			Name:            agentName,
+			ContainerStatus: e.State,
+			Phase:           "created",
+			Image:           image,
+			Labels:          labels,
+			Annotations:     annotations,
+			Template:        template,
+			HarnessConfig:   harnessConfig,
+			HarnessAuth:     harnessAuth,
+			Grove:           grove,
+			GroveID:         groveID,
+			GrovePath:       grovePath,
+			Runtime:         r.Name(),
+		})
+	}
+
+	return agents, nil
+}
+
+func (r *CodespaceRuntime) GetLogs(ctx context.Context, id string) (string, error) {
+	return runSimpleCommand(ctx, r.Command, "cs", "logs", "-c", id)
+}
+
+func (r *CodespaceRuntime) Attach(ctx context.Context, id string) error {
+	return runInteractiveCommand(r.Command, "cs", "ssh", "-c", id, "--", "tmux", "attach", "-t", "scion")
+}
+
+// ImageExists always returns true for codespaces since they use devcontainer
+// configurations rather than pre-built container images.
+func (r *CodespaceRuntime) ImageExists(ctx context.Context, image string) (bool, error) {
+	return true, nil
+}
+
+// PullImage is a no-op for codespaces.
+func (r *CodespaceRuntime) PullImage(ctx context.Context, image string) error {
+	return nil
+}
+
+// Sync copies files between the local workspace and the codespace using gh cs cp.
+func (r *CodespaceRuntime) Sync(ctx context.Context, id string, direction SyncDirection) error {
+	meta, err := loadCodespaceMetadata(id)
+	if err != nil {
+		return fmt.Errorf("failed to load codespace metadata: %w", err)
+	}
+
+	grovePath := meta.Annotations["scion.grove_path"]
+	if grovePath == "" {
+		return fmt.Errorf("codespace %s has no grove_path in metadata", id)
+	}
+
+	agentName := meta.Labels["scion.name"]
+	if agentName == "" {
+		return fmt.Errorf("codespace %s has no agent name in metadata", id)
+	}
+
+	// Determine local workspace path from the worktree pattern
+	groveName := meta.Labels["scion.grove"]
+	localWorkspace := filepath.Join(filepath.Dir(grovePath), ".scion_worktrees", groveName, agentName)
+
+	// Determine the repo name for the codespace workspace path
+	repo := meta.Repo
+	parts := strings.Split(repo, "/")
+	repoName := parts[len(parts)-1]
+	remoteWorkspace := fmt.Sprintf("/workspaces/%s", repoName)
+
+	switch direction {
+	case SyncTo:
+		_, err := runSimpleCommand(ctx, r.Command, "cs", "cp", "-c", id, "-r", localWorkspace+"/.", fmt.Sprintf("remote:%s/", remoteWorkspace))
+		return err
+	case SyncFrom:
+		_, err := runSimpleCommand(ctx, r.Command, "cs", "cp", "-c", id, "-r", fmt.Sprintf("remote:%s/.", remoteWorkspace), localWorkspace+"/")
+		return err
+	default:
+		return fmt.Errorf("sync direction must be specified for codespace runtime")
+	}
+}
+
+func (r *CodespaceRuntime) Exec(ctx context.Context, id string, cmd []string) (string, error) {
+	args := append([]string{"cs", "ssh", "-c", id, "--"}, cmd...)
+	return runSimpleCommand(ctx, r.Command, args...)
+}
+
+// GetWorkspacePath returns the local workspace path for the codespace agent.
+// Since codespaces are remote, this returns the path from local metadata
+// where synced files would be found.
+func (r *CodespaceRuntime) GetWorkspacePath(ctx context.Context, id string) (string, error) {
+	meta, err := loadCodespaceMetadata(id)
+	if err != nil {
+		return "", fmt.Errorf("failed to load codespace metadata for %s: %w", id, err)
+	}
+
+	grovePath := meta.Annotations["scion.grove_path"]
+	agentName := meta.Labels["scion.name"]
+	groveName := meta.Labels["scion.grove"]
+	if grovePath == "" || agentName == "" || groveName == "" {
+		return "", fmt.Errorf("incomplete metadata for codespace %s", id)
+	}
+
+	return filepath.Join(filepath.Dir(grovePath), ".scion_worktrees", groveName, agentName), nil
+}

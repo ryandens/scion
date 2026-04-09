@@ -522,6 +522,13 @@ type V1RuntimeConfig struct {
 	Sync              string            `json:"sync,omitempty" yaml:"sync,omitempty" koanf:"sync"`
 	GKE               bool              `json:"gke,omitempty" yaml:"gke,omitempty" koanf:"gke"`
 	ListAllNamespaces bool              `json:"list_all_namespaces,omitempty" yaml:"list_all_namespaces,omitempty" koanf:"list_all_namespaces"`
+
+	// Codespace-specific fields (used when Type is "codespace")
+	Repo             string `json:"repo,omitempty" yaml:"repo,omitempty" koanf:"repo"`                             // GitHub owner/repo
+	Machine          string `json:"machine,omitempty" yaml:"machine,omitempty" koanf:"machine"`                     // VM machine type
+	IdleTimeout      string `json:"idle_timeout,omitempty" yaml:"idle_timeout,omitempty" koanf:"idle_timeout"`       // Inactivity timeout
+	RetentionPeriod  string `json:"retention_period,omitempty" yaml:"retention_period,omitempty" koanf:"retention_period"` // Post-shutdown retention
+	DevcontainerPath string `json:"devcontainer_path,omitempty" yaml:"devcontainer_path,omitempty" koanf:"devcontainer_path"` // devcontainer.json path
 }
 
 // HarnessConfigEntry defines a harness configuration entry in versioned settings.

@@ -45,7 +45,7 @@ func GetRuntime(grovePath string, profileName string) Runtime {
 			util.Debugf("GetRuntime: ResolveRuntime failed: %v", err)
 			// If profile resolution fails, we might be passed a direct runtime type
 			// Fallback to legacy behavior for now if profileName matches a known type
-			if profileName == "docker" || profileName == "podman" || profileName == "kubernetes" || profileName == "k8s" || profileName == "container" || profileName == "remote" || profileName == "local" {
+			if profileName == "docker" || profileName == "podman" || profileName == "kubernetes" || profileName == "k8s" || profileName == "container" || profileName == "codespace" || profileName == "remote" || profileName == "local" {
 				runtimeType = profileName
 				util.Debugf("GetRuntime: using profileName as runtimeType: %s", runtimeType)
 			} else {
@@ -111,6 +111,24 @@ func GetRuntime(grovePath string, profileName string) Runtime {
 			}
 		}
 		return pr
+	case "codespace":
+		rt := NewCodespaceRuntime()
+		if rtConfig.Repo != "" {
+			rt.Repo = rtConfig.Repo
+		}
+		if rtConfig.Machine != "" {
+			rt.Machine = rtConfig.Machine
+		}
+		if rtConfig.IdleTimeout != "" {
+			rt.IdleTimeout = rtConfig.IdleTimeout
+		}
+		if rtConfig.RetentionPeriod != "" {
+			rt.RetentionPeriod = rtConfig.RetentionPeriod
+		}
+		if rtConfig.DevcontainerPath != "" {
+			rt.DevcontainerPath = rtConfig.DevcontainerPath
+		}
+		return rt
 	case "kubernetes", "k8s":
 		k8sClient, err := k8s.NewClientWithContext(os.Getenv("KUBECONFIG"), rtConfig.Context)
 		if err != nil {
