@@ -330,7 +330,8 @@ func (r *CodespaceRuntime) provisionAsync(codespaceName, agentName, startupScrip
 	}
 	defer os.Remove(tmpFile)
 
-	if _, err := runSimpleCommand(ctx, r.Command, "cs", "cp", "-c", codespaceName, tmpFile, "remote:~/.scion-start.sh"); err != nil {
+	// Use -e flag so scp expands ~ on the remote side
+	if _, err := runSimpleCommand(ctx, r.Command, "cs", "cp", "-e", "-c", codespaceName, tmpFile, "remote:~/.scion-start.sh"); err != nil {
 		runtimeLog.Error("Failed to copy startup script to codespace", "codespace", codespaceName, "error", err)
 		return
 	}
