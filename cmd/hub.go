@@ -510,9 +510,7 @@ func getHubClient(settings *config.Settings) (hubclient.Client, error) {
 	util.Debugf("Hub client auth: %s (source: %s)", info.Method, info.Source)
 	util.Debugf("Hub endpoint: %s", endpoint)
 
-	// No default HTTP client timeout — callers set per-request deadlines
-	// via context. A low client-level timeout would silently cut short
-	// long-running operations like codespace provisioning.
+	opts = append(opts, hubclient.WithTimeout(30*time.Second))
 
 	return hubclient.New(endpoint, opts...)
 }

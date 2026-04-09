@@ -234,9 +234,7 @@ func (r *CodespaceRuntime) Run(ctx context.Context, config RunConfig) (string, e
 		args = append(args, "-b", branch)
 	}
 
-	// Create codespace (blocks until ready).
-	// gh cs create may emit progress lines (e.g. "✓ Codespaces usage ...") before
-	// the actual codespace name on the last line.
+	// Create codespace. gh cs create may emit progress lines before the name.
 	out, err := runSimpleCommand(ctx, r.Command, args...)
 	if err != nil {
 		return "", fmt.Errorf("failed to create codespace: %w (output: %s)", err, out)
@@ -246,15 +244,38 @@ func (r *CodespaceRuntime) Run(ctx context.Context, config RunConfig) (string, e
 		return "", fmt.Errorf("gh cs create returned empty codespace name (full output: %s)", out)
 	}
 
-	// Wait for the codespace to reach "Available" state before SSH/cp operations.
-	if err := r.waitForReady(ctx, codespaceName); err != nil {
-		return "", fmt.Errorf("codespace %s did not become ready: %w", codespaceName, err)
+	// Persist metadata immediately so List() can track this codespace.
+	if err := saveCodespaceMetadata(codespaceMetadata{
+		CodespaceName: codespaceName,
+		Labels:        config.Labels,
+		Annotations:   config.Annotations,
+		Image:         config.Image,
+		Repo:          repo,
+	}); err != nil {
+		util.Debugf("codespace: failed to save metadata: %v", err)
 	}
 
-	// Collect environment variables
+	// Build the startup script content now (while we still have the config)
+	// so the background goroutine doesn't need to hold references to the harness.
+	startupScript, err := r.buildStartupScript(config)
+	if err != nil {
+		return "", err
+	}
+
+	// Launch background provisioning: wait for codespace to be ready, then
+	// copy the startup script and launch the harness via SSH. This allows
+	// Run() to return immediately so the broker can respond to the hub
+	// with a "provisioning" status instead of blocking for minutes.
+	go r.provisionAsync(codespaceName, config.Name, startupScript)
+
+	return codespaceName, nil
+}
+
+// buildStartupScript constructs the bash script that sets up environment
+// variables and starts the harness inside a tmux session.
+func (r *CodespaceRuntime) buildStartupScript(config RunConfig) (string, error) {
 	envLines := r.buildEnvScript(config)
 
-	// Build harness command
 	if config.Harness == nil {
 		return "", fmt.Errorf("no harness provided")
 	}
@@ -274,7 +295,6 @@ func (r *CodespaceRuntime) Run(ctx context.Context, config RunConfig) (string, e
 		cmdLine,
 	)
 
-	// Build and upload startup script
 	var script strings.Builder
 	script.WriteString("#!/bin/bash\nset -e\n")
 	for _, line := range envLines {
@@ -283,37 +303,45 @@ func (r *CodespaceRuntime) Run(ctx context.Context, config RunConfig) (string, e
 	}
 	script.WriteString(tmuxCmd)
 	script.WriteString("\n")
+	return script.String(), nil
+}
 
-	tmpFile := filepath.Join(os.TempDir(), fmt.Sprintf("scion-cs-start-%s.sh", config.Name))
-	if err := os.WriteFile(tmpFile, []byte(script.String()), 0755); err != nil {
-		return "", fmt.Errorf("failed to write startup script: %w", err)
+// provisionAsync runs in the background after Run() returns. It waits for the
+// codespace to become available, copies the startup script, and launches the
+// harness. Errors are logged but cannot be returned to the caller since Run()
+// has already returned the codespace name.
+func (r *CodespaceRuntime) provisionAsync(codespaceName, agentName, startupScript string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+
+	runtimeLog.Info("Codespace provisioning started", "codespace", codespaceName, "agent", agentName)
+
+	// 1. Wait for codespace to reach "Available" state
+	if err := r.waitForReady(ctx, codespaceName); err != nil {
+		runtimeLog.Error("Codespace did not become ready", "codespace", codespaceName, "error", err)
+		return
+	}
+
+	// 2. Write startup script to a temp file and copy to codespace
+	tmpFile := filepath.Join(os.TempDir(), fmt.Sprintf("scion-cs-start-%s.sh", agentName))
+	if err := os.WriteFile(tmpFile, []byte(startupScript), 0755); err != nil {
+		runtimeLog.Error("Failed to write startup script", "codespace", codespaceName, "error", err)
+		return
 	}
 	defer os.Remove(tmpFile)
 
-	// Copy startup script to codespace
-	_, err = runSimpleCommand(ctx, r.Command, "cs", "cp", "-c", codespaceName, tmpFile, "remote:~/.scion-start.sh")
-	if err != nil {
-		return "", fmt.Errorf("failed to copy startup script to codespace: %w", err)
+	if _, err := runSimpleCommand(ctx, r.Command, "cs", "cp", "-c", codespaceName, tmpFile, "remote:~/.scion-start.sh"); err != nil {
+		runtimeLog.Error("Failed to copy startup script to codespace", "codespace", codespaceName, "error", err)
+		return
 	}
 
-	// Execute startup script
-	_, err = runSimpleCommand(ctx, r.Command, "cs", "ssh", "-c", codespaceName, "--", "chmod +x ~/.scion-start.sh && ~/.scion-start.sh")
-	if err != nil {
-		return "", fmt.Errorf("failed to start harness in codespace: %w (codespace: %s)", err, codespaceName)
+	// 3. Execute startup script (starts tmux session and returns)
+	if _, err := runSimpleCommand(ctx, r.Command, "cs", "ssh", "-c", codespaceName, "--", "chmod +x ~/.scion-start.sh && ~/.scion-start.sh"); err != nil {
+		runtimeLog.Error("Failed to start harness in codespace", "codespace", codespaceName, "error", err)
+		return
 	}
 
-	// Persist metadata locally for List()
-	if err := saveCodespaceMetadata(codespaceMetadata{
-		CodespaceName: codespaceName,
-		Labels:        config.Labels,
-		Annotations:   config.Annotations,
-		Image:         config.Image,
-		Repo:          repo,
-	}); err != nil {
-		util.Debugf("codespace: failed to save metadata: %v", err)
-	}
-
-	return codespaceName, nil
+	runtimeLog.Info("Codespace provisioning completed", "codespace", codespaceName, "agent", agentName)
 }
 
 // codespaceViewEntry represents the JSON output from gh cs view.

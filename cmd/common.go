@@ -698,9 +698,7 @@ func startAgentViaHub(hubCtx *HubContext, agentName, task string, resume bool, i
 		}
 	}
 
-	// Use a generous timeout for agent creation. Some runtimes (e.g., codespace)
-	// involve provisioning remote VMs and can take several minutes.
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
 	if !isJSONOutput() {
