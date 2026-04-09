@@ -83,7 +83,9 @@ func NewTransport(baseURL string, opts ...TransportOption) *Transport {
 	t := &Transport{
 		BaseURL: strings.TrimSuffix(baseURL, "/"),
 		HTTPClient: &http.Client{
-			Timeout: 30 * time.Second,
+			// No default timeout — callers control deadlines via context.
+			// This allows long-running operations (e.g., codespace creation)
+			// to use generous context deadlines without the transport cutting them short.
 		},
 		UserAgent:  "scion-client/1.0",
 		MaxRetries: 0,
