@@ -295,6 +295,13 @@ func (r *CodespaceRuntime) buildStartupScript(config RunConfig) (string, error) 
 		cmdLine,
 	)
 
+	// Derive the repo name for the codespace workspace path (/workspaces/<repo-name>).
+	repoName := ""
+	if repo := r.resolveRepo(config); repo != "" {
+		parts := strings.Split(repo, "/")
+		repoName = parts[len(parts)-1]
+	}
+
 	var script strings.Builder
 	script.WriteString("#!/bin/bash\nset -e\n")
 	// Ensure ~/.local/bin is on PATH — non-interactive SSH sessions may not
@@ -303,6 +310,21 @@ func (r *CodespaceRuntime) buildStartupScript(config RunConfig) (string, error) 
 	script.WriteString("export PATH=\"$HOME/.local/bin:$PATH\"\n")
 	// Ensure tmux is available — codespace devcontainer images may not include it.
 	script.WriteString("if ! command -v tmux &>/dev/null; then sudo apt-get update -qq && sudo apt-get install -y -qq tmux; fi\n")
+
+	// cd into the workspace directory so the harness starts in the repo root.
+	if repoName != "" {
+		wsPath := fmt.Sprintf("/workspaces/%s", repoName)
+		script.WriteString(fmt.Sprintf("cd %s\n", wsPath))
+
+		// Pre-seed Claude Code config to skip onboarding and workspace trust prompts.
+		script.WriteString(fmt.Sprintf(`if [ ! -f "$HOME/.claude.json" ]; then
+  cat > "$HOME/.claude.json" << 'CLAUDE_EOF'
+{"hasCompletedOnboarding":true,"projects":{"%s":{"hasTrustDialogAccepted":true}}}
+CLAUDE_EOF
+fi
+`, wsPath))
+	}
+
 	for _, line := range envLines {
 		script.WriteString(line)
 		script.WriteString("\n")
