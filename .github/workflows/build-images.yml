@@ -32,14 +32,14 @@ on:
       tag:
         description: 'Image tag'
         default: 'latest'
-      platform:
-        description: 'Target platform(s)'
-        type: choice
-        options:
-          - all
-          - linux/amd64
-          - linux/arm64
-        default: 'all'
+#      platform:
+#        description: 'Target platform(s)'
+#        type: choice
+#        options:
+#          - all
+#          - linux/amd64
+#          - linux/arm64
+#        default: 'all'
 
   workflow_call:
     inputs:
@@ -55,10 +55,10 @@ on:
         description: 'Image tag'
         type: string
         default: 'latest'
-      platform:
-        description: 'Target platform(s) (all, linux/amd64, linux/arm64)'
-        type: string
-        default: 'all'
+#      platform:
+#        description: 'Target platform(s) (all, linux/amd64, linux/arm64)'
+#        type: string
+#        default: 'all'
 
 permissions:
   contents: read
@@ -67,7 +67,7 @@ permissions:
 jobs:
   build:
     name: Build and Push Images
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -89,5 +89,5 @@ jobs:
             --registry "${{ inputs.registry }}" \
             --target "${{ inputs.target }}" \
             --tag "${{ inputs.tag }}" \
-            --platform "${{ inputs.platform }}" \
+            --platform "linux/arm64" \
             --push
