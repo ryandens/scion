@@ -297,6 +297,10 @@ func (r *CodespaceRuntime) buildStartupScript(config RunConfig) (string, error) 
 
 	var script strings.Builder
 	script.WriteString("#!/bin/bash\nset -e\n")
+	// Ensure ~/.local/bin is on PATH — non-interactive SSH sessions may not
+	// source the full shell profile, so tools installed there (e.g. claude)
+	// would not be found.
+	script.WriteString("export PATH=\"$HOME/.local/bin:$PATH\"\n")
 	// Ensure tmux is available — codespace devcontainer images may not include it.
 	script.WriteString("if ! command -v tmux &>/dev/null; then sudo apt-get update -qq && sudo apt-get install -y -qq tmux; fi\n")
 	for _, line := range envLines {
