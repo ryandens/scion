@@ -304,8 +304,11 @@ func (r *CodespaceRuntime) buildStartupScript(config RunConfig) (string, error) 
 	}
 	cmdLine := strings.Join(quotedArgs, " ")
 
+	// Use separate tmux commands instead of chaining with \; because
+	// the task argument may contain spaces/quotes that confuse tmux's
+	// command separator parsing.
 	tmuxCmd := fmt.Sprintf(
-		"tmux new-session -d -s scion -n agent %s \\; new-window -t scion -n shell \\; select-window -t scion:agent",
+		"tmux new-session -d -s scion -n agent %s && tmux new-window -t scion -n shell && tmux select-window -t scion:agent",
 		cmdLine,
 	)
 
