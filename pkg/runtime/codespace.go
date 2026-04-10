@@ -372,8 +372,23 @@ func (r *CodespaceRuntime) provisionAsync(codespaceName, agentName, startupScrip
 		return
 	}
 
-	// 2. Start reverse SSH tunnel so the codespace can reach the hub on localhost.
-	// This runs in the background for the lifetime of the codespace.
+	// 2. Write startup script to a temp file and copy to codespace
+	tmpFile := filepath.Join(os.TempDir(), fmt.Sprintf("scion-cs-start-%s.sh", agentName))
+	if err := os.WriteFile(tmpFile, []byte(startupScript), 0755); err != nil {
+		runtimeLog.Error("Failed to write startup script", "codespace", codespaceName, "error", err)
+		return
+	}
+	defer os.Remove(tmpFile)
+
+	// Use -e flag so scp expands ~ on the remote side
+	if _, err := runSimpleCommand(ctx, r.Command, "cs", "cp", "-e", "-c", codespaceName, tmpFile, "remote:~/.scion-start.sh"); err != nil {
+		runtimeLog.Error("Failed to copy startup script to codespace", "codespace", codespaceName, "error", err)
+		return
+	}
+
+	// 3. Start reverse SSH tunnel so the codespace can reach the hub on localhost.
+	// This must be started BEFORE the harness so hub connectivity is available
+	// when the agent starts, but AFTER cp to avoid SSH multiplexing conflicts.
 	if hubPort != "" {
 		tunnelSpec := fmt.Sprintf("%s:localhost:%s", hubPort, hubPort)
 		tunnelCmd := exec.Command(r.Command, "cs", "ssh", "-c", codespaceName, "--", "-N", "-R", tunnelSpec)
@@ -388,20 +403,8 @@ func (r *CodespaceRuntime) provisionAsync(codespaceName, agentName, startupScrip
 				}
 			}()
 		}
-	}
-
-	// 3. Write startup script to a temp file and copy to codespace
-	tmpFile := filepath.Join(os.TempDir(), fmt.Sprintf("scion-cs-start-%s.sh", agentName))
-	if err := os.WriteFile(tmpFile, []byte(startupScript), 0755); err != nil {
-		runtimeLog.Error("Failed to write startup script", "codespace", codespaceName, "error", err)
-		return
-	}
-	defer os.Remove(tmpFile)
-
-	// Use -e flag so scp expands ~ on the remote side
-	if _, err := runSimpleCommand(ctx, r.Command, "cs", "cp", "-e", "-c", codespaceName, tmpFile, "remote:~/.scion-start.sh"); err != nil {
-		runtimeLog.Error("Failed to copy startup script to codespace", "codespace", codespaceName, "error", err)
-		return
+		// Brief pause to let the tunnel establish before starting the harness.
+		time.Sleep(2 * time.Second)
 	}
 
 	// 4. Execute startup script (starts tmux session and returns)
