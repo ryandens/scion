@@ -325,16 +325,26 @@ func (s *LocalPTYSession) Run() error {
 		return s.runK8sExec()
 	}
 
-	// Start docker/container exec with PTY
-	if err := s.startDockerExec(); err != nil {
-		return fmt.Errorf("failed to start exec: %w", err)
+	// Codespace runtime uses gh cs ssh instead of docker exec
+	if s.runtimeCmd == "codespace" {
+		if err := s.startCodespaceExec(); err != nil {
+			return fmt.Errorf("failed to start codespace exec: %w", err)
+		}
+	} else {
+		// Start docker/container exec with PTY
+		if err := s.startDockerExec(); err != nil {
+			return fmt.Errorf("failed to start exec: %w", err)
+		}
 	}
 
 	// Send the active tmux window name so the web toolbar reflects the
 	// correct initial state (the default assumption is "agent").
-	if wn := queryTmuxActiveWindow(s.ctx, s.runtimeCmd, s.containerID, s.execUser); wn != "" {
-		msg := wsprotocol.NewPTYDataMessage(activeWindowOSC(wn))
-		_ = s.writeToWebSocket(msg)
+	// Skip for codespace — queryTmuxActiveWindow uses docker exec style.
+	if s.runtimeCmd != "codespace" {
+		if wn := queryTmuxActiveWindow(s.ctx, s.runtimeCmd, s.containerID, s.execUser); wn != "" {
+			msg := wsprotocol.NewPTYDataMessage(activeWindowOSC(wn))
+			_ = s.writeToWebSocket(msg)
+		}
 	}
 
 	defer func() {
@@ -533,6 +543,33 @@ func (s *LocalPTYSession) startDockerExec() error {
 	return nil
 }
 
+// startCodespaceExec starts a gh cs ssh session with tmux attach using a real PTY.
+// Codespaces are accessed via the GitHub CLI rather than direct container exec.
+func (s *LocalPTYSession) startCodespaceExec() error {
+	// Resolve the codespace name from the container ID (which may be an agent name)
+	csName := s.containerID
+
+	args := []string{
+		"cs", "ssh", "-c", csName, "--",
+		"tmux", "attach-session", "-t", "scion",
+	}
+
+	s.cmd = exec.CommandContext(s.ctx, "gh", args...)
+	s.cmd.Env = append(os.Environ(), "TERM=xterm-256color")
+
+	ptmx, err := pty.StartWithSize(s.cmd, &pty.Winsize{
+		Cols: uint16(s.cols),
+		Rows: uint16(s.rows),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to start gh cs ssh with PTY: %w", err)
+	}
+
+	s.ptyMaster = ptmx
+	s.ptySlave = ptmx
+	return nil
+}
+
 // readFromPTY reads data from the PTY and sends to WebSocket.
 func (s *LocalPTYSession) readFromPTY() error {
 	buf := make([]byte, ptyMaxDataSize)
@@ -670,15 +707,25 @@ func (h *StreamPTYHandler) Run() error {
 		return h.runK8sExec()
 	}
 
-	// Start docker/container exec with tmux attach
-	if err := h.startDockerExec(); err != nil {
-		return err
+	// Codespace runtime uses gh cs ssh instead of docker exec
+	if runtimeCmd == "codespace" {
+		if err := h.startCodespaceExec(); err != nil {
+			return err
+		}
+	} else {
+		// Start docker/container exec with tmux attach
+		if err := h.startDockerExec(); err != nil {
+			return err
+		}
 	}
 
 	// Send the active tmux window name so the web toolbar reflects the
 	// correct initial state (the default assumption is "agent").
-	if wn := queryTmuxActiveWindow(h.ctx, runtimeCmd, h.containerID, h.execUser); wn != "" {
-		_ = h.client.SendStreamData(h.handler.streamID, activeWindowOSC(wn))
+	// Skip for codespace — queryTmuxActiveWindow uses docker exec style.
+	if runtimeCmd != "codespace" {
+		if wn := queryTmuxActiveWindow(h.ctx, runtimeCmd, h.containerID, h.execUser); wn != "" {
+			_ = h.client.SendStreamData(h.handler.streamID, activeWindowOSC(wn))
+		}
 	}
 
 	defer func() {
@@ -913,6 +960,29 @@ func (h *StreamPTYHandler) startDockerExec() error {
 	})
 	if err != nil {
 		return fmt.Errorf("failed to start %s exec with PTY: %w", runtimeCmd, err)
+	}
+
+	h.ptyMaster = ptmx
+	h.ptySlave = ptmx
+	return nil
+}
+
+// startCodespaceExec starts a gh cs ssh session with tmux attach using a real PTY.
+func (h *StreamPTYHandler) startCodespaceExec() error {
+	args := []string{
+		"cs", "ssh", "-c", h.containerID, "--",
+		"tmux", "attach-session", "-t", "scion",
+	}
+
+	h.cmd = exec.CommandContext(h.ctx, "gh", args...)
+	h.cmd.Env = append(os.Environ(), "TERM=xterm-256color")
+
+	ptmx, err := pty.StartWithSize(h.cmd, &pty.Winsize{
+		Cols: uint16(h.cols),
+		Rows: uint16(h.rows),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to start gh cs ssh with PTY: %w", err)
 	}
 
 	h.ptyMaster = ptmx
