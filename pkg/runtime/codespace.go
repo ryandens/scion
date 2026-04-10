@@ -328,6 +328,45 @@ func (r *CodespaceRuntime) buildStartupScript(config RunConfig) (string, error) 
 	// Ensure tmux is available — codespace devcontainer images may not include it.
 	script.WriteString("if ! command -v tmux &>/dev/null; then sudo apt-get update -qq && sudo apt-get install -y -qq tmux; fi\n")
 
+	// Write scion's tmux.conf if not present. This enables mouse scrollback,
+	// web toolbar window switching, extended keys, and other integration features
+	// that the scion container images ship by default.
+	script.WriteString(`if [ ! -f "$HOME/.tmux.conf" ]; then
+  cat > "$HOME/.tmux.conf" << 'TMUX_EOF'
+set -g default-terminal "xterm-256color"
+set -g history-limit 10000
+set -s escape-time 0
+set -g extended-keys always
+set -as terminal-features 'xterm*:extkeys'
+set -g mouse on
+bind m set -g mouse off \; display "Mouse: OFF"
+bind M set -g mouse on \; display "Mouse: ON"
+bind A select-window -t scion:agent
+bind S if-shell "tmux select-window -t scion:shell 2>/dev/null" "" "new-window -t scion -n shell"
+set -g status-style bg=colour235,fg=colour136
+set -g status-left "[scion] "
+set -g status-right-length 100
+set -g status-right "#[fg=colour244]#(echo $SCION_TEMPLATE_NAME) #[fg=colour136]/ #[fg=colour166]#(echo $SCION_AGENT_NAME) #[fg=colour136](#(echo $SCION_BROKER_NAME)) #[fg=colour136]%H:%M %d-%b-%y"
+set -g allow-passthrough on
+set -as terminal-features ",xterm*:RGB"
+set-window-option -g window-status-style fg=colour244,bg=default
+set-window-option -g window-status-current-style fg=colour166,bg=default,bright
+set -g pane-border-style fg=colour235
+set -g pane-active-border-style fg=colour240
+set -g message-style bg=colour235,fg=colour166
+set -as terminal-overrides ',*:Smulx=\E[4::%p1%dm'
+set -as terminal-overrides ',*:Setulc=\E[58::2::%p1%{65536}%/%d::%p1%{256}%/%{255}%&%d::%p1%{255}%&%d%;m'
+set -s set-clipboard on
+unbind -T root MouseDrag1Pane
+unbind -T copy-mode MouseDrag1Pane
+unbind -T copy-mode-vi MouseDrag1Pane
+unbind -T copy-mode MouseDragEnd1Pane
+unbind -T copy-mode-vi MouseDragEnd1Pane
+set-hook -g pane-exited "if-shell '! tmux list-windows -t scion -F \"##{window_name}\" 2>/dev/null | grep -q \"^agent$\"' 'kill-session -t scion'"
+TMUX_EOF
+fi
+`)
+
 	// cd into the workspace directory so the harness starts in the repo root.
 	if repoName != "" {
 		wsPath := fmt.Sprintf("/workspaces/%s", repoName)
@@ -341,8 +380,8 @@ CLAUDE_EOF
 fi
 `, wsPath))
 
-	// Pre-seed Claude Code settings to skip the bypass-permissions confirmation.
-	script.WriteString(`mkdir -p "$HOME/.claude"
+		// Pre-seed Claude Code settings to skip the bypass-permissions confirmation.
+		script.WriteString(`mkdir -p "$HOME/.claude"
 if [ ! -f "$HOME/.claude/settings.json" ]; then
   echo '{"skipDangerousModePermissionPrompt":true}' > "$HOME/.claude/settings.json"
 fi
@@ -488,9 +527,9 @@ func (r *CodespaceRuntime) buildEnvScript(config RunConfig) []string {
 	var lines []string
 
 	addEnv := func(k, v string) {
-		if codespaceSkipEnvVars[k] {
-			return
-		}
+		//if codespaceSkipEnvVars[k] {
+		//	return
+		//}
 		lines = append(lines, fmt.Sprintf("export %s=%s", k, shellQuote(codespaceRewriteEnv(v))))
 	}
 
