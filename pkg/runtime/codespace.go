@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -262,11 +263,24 @@ func (r *CodespaceRuntime) Run(ctx context.Context, config RunConfig) (string, e
 		return "", err
 	}
 
+	// Extract the hub port from env vars for the reverse SSH tunnel.
+	hubPort := ""
+	for _, e := range config.Env {
+		parts := strings.SplitN(e, "=", 2)
+		if len(parts) == 2 && (parts[0] == "SCION_HUB_ENDPOINT" || parts[0] == "SCION_HUB_URL") && hubPort == "" {
+			if u, err := url.Parse(parts[1]); err == nil {
+				if p := u.Port(); p != "" {
+					hubPort = p
+				}
+			}
+		}
+	}
+
 	// Launch background provisioning: wait for codespace to be ready, then
 	// copy the startup script and launch the harness via SSH. This allows
 	// Run() to return immediately so the broker can respond to the hub
 	// with a "provisioning" status instead of blocking for minutes.
-	go r.provisionAsync(codespaceName, config.Name, startupScript)
+	go r.provisionAsync(codespaceName, config.Name, startupScript, hubPort)
 
 	return codespaceName, nil
 }
@@ -342,10 +356,11 @@ fi
 }
 
 // provisionAsync runs in the background after Run() returns. It waits for the
-// codespace to become available, copies the startup script, and launches the
-// harness. Errors are logged but cannot be returned to the caller since Run()
-// has already returned the codespace name.
-func (r *CodespaceRuntime) provisionAsync(codespaceName, agentName, startupScript string) {
+// codespace to become available, starts a reverse SSH tunnel for hub
+// connectivity, copies the startup script, and launches the harness. Errors
+// are logged but cannot be returned to the caller since Run() has already
+// returned the codespace name.
+func (r *CodespaceRuntime) provisionAsync(codespaceName, agentName, startupScript, hubPort string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
@@ -357,7 +372,25 @@ func (r *CodespaceRuntime) provisionAsync(codespaceName, agentName, startupScrip
 		return
 	}
 
-	// 2. Write startup script to a temp file and copy to codespace
+	// 2. Start reverse SSH tunnel so the codespace can reach the hub on localhost.
+	// This runs in the background for the lifetime of the codespace.
+	if hubPort != "" {
+		tunnelSpec := fmt.Sprintf("%s:localhost:%s", hubPort, hubPort)
+		tunnelCmd := exec.Command(r.Command, "cs", "ssh", "-c", codespaceName, "--", "-N", "-R", tunnelSpec)
+		if err := tunnelCmd.Start(); err != nil {
+			runtimeLog.Error("Failed to start reverse SSH tunnel", "codespace", codespaceName, "port", hubPort, "error", err)
+		} else {
+			runtimeLog.Info("Reverse SSH tunnel started", "codespace", codespaceName, "port", hubPort, "pid", tunnelCmd.Process.Pid)
+			// Reap the process when it exits to avoid zombies.
+			go func() {
+				if err := tunnelCmd.Wait(); err != nil {
+					runtimeLog.Debug("Reverse SSH tunnel exited", "codespace", codespaceName, "error", err)
+				}
+			}()
+		}
+	}
+
+	// 3. Write startup script to a temp file and copy to codespace
 	tmpFile := filepath.Join(os.TempDir(), fmt.Sprintf("scion-cs-start-%s.sh", agentName))
 	if err := os.WriteFile(tmpFile, []byte(startupScript), 0755); err != nil {
 		runtimeLog.Error("Failed to write startup script", "codespace", codespaceName, "error", err)
@@ -371,7 +404,7 @@ func (r *CodespaceRuntime) provisionAsync(codespaceName, agentName, startupScrip
 		return
 	}
 
-	// 3. Execute startup script (starts tmux session and returns)
+	// 4. Execute startup script (starts tmux session and returns)
 	if _, err := runSimpleCommand(ctx, r.Command, "cs", "ssh", "-c", codespaceName, "--", "chmod +x ~/.scion-start.sh && ~/.scion-start.sh"); err != nil {
 		runtimeLog.Error("Failed to start harness in codespace", "codespace", codespaceName, "error", err)
 		return
@@ -430,18 +463,38 @@ func (r *CodespaceRuntime) waitForReady(ctx context.Context, codespaceName strin
 	}
 }
 
+// codespaceSkipEnvVars lists environment variables that should not be injected
+// into codespaces because the codespace provides its own values.
+var codespaceSkipEnvVars = map[string]bool{
+	"GITHUB_TOKEN": true,
+}
+
+// codespaceRewriteEnv rewrites env values for the codespace environment.
+// Docker bridge hostnames (host.docker.internal) are replaced with localhost
+// since codespaces use a reverse SSH tunnel to reach the host.
+func codespaceRewriteEnv(v string) string {
+	return strings.ReplaceAll(v, "host.docker.internal", "localhost")
+}
+
 // buildEnvScript collects environment variables from the RunConfig and returns
 // export statements suitable for a bash script.
 func (r *CodespaceRuntime) buildEnvScript(config RunConfig) []string {
 	var lines []string
 
+	addEnv := func(k, v string) {
+		if codespaceSkipEnvVars[k] {
+			return
+		}
+		lines = append(lines, fmt.Sprintf("export %s=%s", k, shellQuote(codespaceRewriteEnv(v))))
+	}
+
 	if config.Harness != nil {
 		for k, v := range config.Harness.GetEnv(config.Name, config.HomeDir, config.UnixUsername) {
-			lines = append(lines, fmt.Sprintf("export %s=%s", k, shellQuote(v)))
+			addEnv(k, v)
 		}
 		if config.TelemetryEnabled {
 			for k, v := range config.Harness.GetTelemetryEnv() {
-				lines = append(lines, fmt.Sprintf("export %s=%s", k, shellQuote(v)))
+				addEnv(k, v)
 			}
 		}
 	}
@@ -449,13 +502,13 @@ func (r *CodespaceRuntime) buildEnvScript(config RunConfig) []string {
 	for _, e := range config.Env {
 		parts := strings.SplitN(e, "=", 2)
 		if len(parts) == 2 {
-			lines = append(lines, fmt.Sprintf("export %s=%s", parts[0], shellQuote(parts[1])))
+			addEnv(parts[0], parts[1])
 		}
 	}
 
 	for _, s := range config.ResolvedSecrets {
 		if s.Type == "environment" || s.Type == "" {
-			lines = append(lines, fmt.Sprintf("export %s=%s", s.Target, shellQuote(s.Value)))
+			addEnv(s.Target, s.Value)
 		}
 	}
 
