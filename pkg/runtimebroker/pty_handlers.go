@@ -549,8 +549,11 @@ func (s *LocalPTYSession) startCodespaceExec() error {
 	// Resolve the codespace name from the container ID (which may be an agent name)
 	csName := s.containerID
 
+	// -tt forces SSH to allocate a remote PTY even when the local stdin
+	// is not a terminal (the PTY handler provides one via pty.StartWithSize,
+	// but gh cs ssh doesn't detect it).
 	args := []string{
-		"cs", "ssh", "-c", csName, "--",
+		"cs", "ssh", "-c", csName, "--", "-tt",
 		"tmux", "attach-session", "-t", "scion",
 	}
 
@@ -969,8 +972,10 @@ func (h *StreamPTYHandler) startDockerExec() error {
 
 // startCodespaceExec starts a gh cs ssh session with tmux attach using a real PTY.
 func (h *StreamPTYHandler) startCodespaceExec() error {
+	// -tt forces SSH to allocate a remote PTY even when the local stdin
+	// is not a terminal.
 	args := []string{
-		"cs", "ssh", "-c", h.containerID, "--",
+		"cs", "ssh", "-c", h.containerID, "--", "-tt",
 		"tmux", "attach-session", "-t", "scion",
 	}
 
